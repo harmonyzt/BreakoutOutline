@@ -614,6 +614,7 @@ namespace ABI_H.Drawer
                     continue;
                 }
         
+                // deprecate
                 float dSqr = (li.transform.position - _passPlayerPos).sqrMagnitude;
                 if (dSqr > _passPrefilterSqr) continue;
                 if (_passInteractHideSqr > 0f && dSqr < _passInteractHideSqr)

@@ -52,7 +52,7 @@ namespace ABI_H
             OutlineWidth          = Config.Bind("Visuals", "Outline Width",3f,
                 new ConfigDescription("Outline thickness in pixels (distance-independent)",
                     new AcceptableValueRange<float>(1f, 20f)));
-            DetectionRange        = Config.Bind("General", "Draw Range",     5.5f,
+            DetectionRange        = Config.Bind("General", "Draw Range",     10f,
                 new ConfigDescription("Max distance from player to show outlines (meters)", 
                     new AcceptableValueRange<float>(1f, 25f)));
             InteractHideDistance  = Config.Bind("General", "Interact Hide Distance", 0.1f,

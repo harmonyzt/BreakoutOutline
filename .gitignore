@@ -1,0 +1,6 @@
+bin/
+obj/
+*.txt
+*vs*
+*idea*
+Folder.DotSettings.user

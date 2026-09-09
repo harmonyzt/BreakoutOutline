@@ -9,7 +9,7 @@ using EFT.InventoryLogic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace ABI_H.Drawer
+namespace BreakoutOutlines.Drawer
 {
     public partial class LootOutlineController : MonoBehaviour
     {
@@ -18,14 +18,14 @@ namespace ABI_H.Drawer
         private Material _contStencilMat, _contDrawMat, _contClearMat;
         // Bodies get their own draw material (larger depth bias so a flat corpse doesn't self-clip against the floor)
         private Material _bodyDrawMat;
-        private bool     _useThreePass;
+        private bool _useThreePass;
 
         // Preferred pipeline: all silhouettes into one mask RT, then a single fullscreen edge pass.
         // Cost no longer scales with object/submesh count
         private Material _maskMat, _edgeMat;
-        private bool     _useMaskEdge;
-        private int      _maskRtId;
-        private int      _fadeRtId;
+        private bool _useMaskEdge;
+        private int _maskRtId;
+        private int _fadeRtId;
         // Contact-surface depth tolerance for items/containers in the mask pass.
         // Bodies use the config-driven BodyDepthBias instead
         private const float ItemDepthBias = 0.03f;
@@ -48,27 +48,27 @@ namespace ABI_H.Drawer
         // enabled while occlusion is on (see ApplyDepthMode)
         private bool _eftProvidesDepth;
 
-        // Cached once per Update. Must be the real FPS camera - Camera.main can
-        // return a wider environment camera and break the back-cull/frustum checks
+        // Cached once per Update from CameraManager.Instance.Camera, the real FPS
+        // camera used for back-cull and frustum checks
         private Camera _mainCam;
 
         // Cached discovery
-        private LootableContainer[] _containerCache = Array.Empty<LootableContainer>();
+        private LootableContainer[] _containerCache = [];
 
         // Per-pass snapshot of GameWorld.LootItems.List_0 (the live world-loot
         // registry - every LootItem passes through GameWorld.RegisterLoot)
         // Plain reference copy, no scene scan
         private readonly List<LootItem> _lootItemsSnapshot = new List<LootItem>();
         // Fallback if the registry is unexpectedly empty: throttled full-scene scan
-        private LootItem[]         _lootItemCache         = Array.Empty<LootItem>();
+        private LootItem[] _lootItemCache = Array.Empty<LootItem>();
         private float _lootItemCacheBuildTime = -999f;
         private const float LootItemCacheRefreshSeconds = 10f;
         private float _lastLootDiagTime = -999f;
 
         // Local-player equipped-ID cache; the deep GetAllItems walk allocates,
         // so it's refreshed on a TTL instead of every pass
-        private string[] _mainEquipIds    = Array.Empty<string>();
-        private float    _mainEquipBuiltAt = -999f;
+        private string[] _mainEquipIds = Array.Empty<string>();
+        private float _mainEquipBuiltAt = -999f;
         private const float MainEquipRefreshSeconds = 2f;
 
         // Containers are map-static - scanned with a throttled retry while the
@@ -83,6 +83,8 @@ namespace ABI_H.Drawer
         // runs per in-range container per pass; contents only change on looting,
         // so 2s of staleness is invisible. Cleared on world reset.
         private struct ContainerLoot { public bool Has; public float At; }
+        private static readonly HashSet<int> _searchedContainers = new();
+        private static IPlayerSearchController _searchController;
         private readonly Dictionary<int, ContainerLoot> _containerLootCache
             = new Dictionary<int, ContainerLoot>();
         private const float ContainerLootTtlSeconds = 2f;
@@ -92,16 +94,16 @@ namespace ABI_H.Drawer
         // CommandBuffer.DrawRenderer for live skinning (dead bodies).
         private readonly struct MeshEntry
         {
-            public readonly Mesh      Mesh;
+            public readonly Mesh Mesh;
             public readonly Transform Tx;          // null → use FixedMatrix
             public readonly Matrix4x4 LocalOffset;
             public readonly Matrix4x4 FixedMatrix;
-            public readonly int       Layer;
+            public readonly int Layer;
             public readonly SkinnedMeshRenderer Smr;
             // Cached for live state queries (active/enabled, current world bounds).
             // Static entries store their MeshRenderer here; SMR entries leave it null
             // because Smr already covers everything we need.
-            public readonly Renderer  Rend;
+            public readonly Renderer Rend;
 
             public MeshEntry(Mesh m, Transform t, int l, Renderer r = null)
             { Mesh = m; Tx = t; LocalOffset = Matrix4x4.identity; FixedMatrix = Matrix4x4.identity; Layer = l; Smr = null; Rend = r; }
@@ -114,12 +116,12 @@ namespace ABI_H.Drawer
         private readonly struct RendererData
         {
             public readonly MeshEntry[] Entries;
-            public readonly Bounds      Bounds;
+            public readonly Bounds Bounds;
             // Corpse entries set updateWhenOffscreen=true on their SMRs (accurate
             // bounds/visibility for settled ragdolls). That flag costs a full
             // skinning pass per SMR per frame even when the corpse is offscreen,
             // so it MUST be reset when the entry is pruned - see ReleaseCorpseSmrs.
-            public readonly bool        IsBody;
+            public readonly bool IsBody;
             public RendererData(MeshEntry[] e, Bounds b, bool isBody = false) { Entries = e; Bounds = b; IsBody = isBody; }
         }
 
@@ -135,10 +137,10 @@ namespace ABI_H.Drawer
             public GameObject Go;
             public bool ExpandToPrefabRoot;
             public bool BodyOnly;
-            public int  InstanceId;
+            public int InstanceId;
         }
         private readonly Queue<PendingCache> _cacheQueue = new Queue<PendingCache>();
-        private readonly HashSet<int>        _pendingCacheIds = new HashSet<int>();
+        private readonly HashSet<int> _pendingCacheIds = new HashSet<int>();
         // Failed cache builds retry on a timed backoff - NEVER a permanent
         // blacklist. A build can transiently return 0 entries while a ragdoll is
         // still initialising, or while EFT's room culling has the object's
@@ -166,13 +168,14 @@ namespace ABI_H.Drawer
         // carry - just the geometry, type, and a world AABB for the frustum cull.
         private struct DrawObject
         {
+            public int SourceId;
             public MeshEntry[] Entries;
-            public bool        IsContainer; // selects material set + colour
-            public bool        IsBody;      // dead body: own draw material (larger depth bias)
-            public Bounds      Bounds;      // world AABB for per-frame frustum cull
-            public float       Fade;       // 0 at detection range, 1 at the player
-            public DrawObject(MeshEntry[] e, bool c, Bounds b, float fade, bool body = false)
-            { Entries = e; IsContainer = c; IsBody = body; Bounds = b; Fade = fade; }
+            public bool IsContainer; // selects material set + colour
+            public bool IsBody;      // dead body: own draw material (larger depth bias)
+            public Bounds Bounds;      // world AABB for per-frame frustum cull
+            public float Fade;       // 0 at detection range, 1 at the player
+            public DrawObject(int sourceId, MeshEntry[] e, bool c, Bounds b, float fade, bool body = false)
+            { SourceId = sourceId; Entries = e; IsContainer = c; IsBody = body; Bounds = b; Fade = fade; }
         }
         private readonly List<DrawObject> _drawObjects = new List<DrawObject>();
         // Every player ever observed alive. SPT removes some bots (especially
@@ -184,38 +187,39 @@ namespace ABI_H.Drawer
         // Dead-player positions this pass, used to suppress weapons that fell
         // with the ragdoll (they'd overlap the body outline).
         private readonly List<Vector3> _deadBodyPositions = new List<Vector3>();
-        private const float BodyWeaponSuppressRadius    = 1.15f;
+        private const float BodyWeaponSuppressRadius = 1.15f;
         private const float BodyWeaponSuppressRadiusSqr = BodyWeaponSuppressRadius * BodyWeaponSuppressRadius;
         // Debug-log dedup sets (one line per unique prefab name per session).
         private static readonly HashSet<string> _loggedItemFailures = new HashSet<string>();
         private static int _bodiesLogged;
-        private const int  BodyLogCap = 3;
+        private const int BodyLogCap = 3;
         private static readonly HashSet<string> _loggedQueued = new HashSet<string>();
         private static readonly HashSet<string> _loggedOwnershipRejects = new HashSet<string>();
+        private bool _limitOpacityForNightVision;
         private MaterialPropertyBlock _mpb;
         private static readonly int PROP_OutlineColor = Shader.PropertyToID("_OutlineColor");
         private static readonly int PROP_OutlineWidth = Shader.PropertyToID("_OutlineWidth");
         private static readonly int PROP_ObjectCenter = Shader.PropertyToID("_ObjectCenter");
         // Tier-2 mask/edge shader properties.
-        private static readonly int PROP_DepthOcclude   = Shader.PropertyToID("_DepthOcclude");
-        private static readonly int PROP_DepthBias      = Shader.PropertyToID("_DepthBias");
+        private static readonly int PROP_DepthOcclude = Shader.PropertyToID("_DepthOcclude");
+        private static readonly int PROP_DepthBias = Shader.PropertyToID("_DepthBias");
         private static readonly int PROP_OutlineWidthPx = Shader.PropertyToID("_OutlineWidthPx");
-        private static readonly int PROP_EdgeOcclude    = Shader.PropertyToID("_EdgeOcclude");
+        private static readonly int PROP_EdgeOcclude = Shader.PropertyToID("_EdgeOcclude");
         // Per-type ring occlusion: the mask stores signed depth (negative = body)
         // and the edge pass picks the matching bias.
         private static readonly int PROP_EdgeDepthBiasItem = Shader.PropertyToID("_EdgeDepthBiasItem");
         private static readonly int PROP_EdgeDepthBiasBody = Shader.PropertyToID("_EdgeDepthBiasBody");
-        private static readonly int PROP_MaskBodyFlag      = Shader.PropertyToID("_MaskBodyFlag");
-        private static readonly int PROP_OutlineAlpha   = Shader.PropertyToID("_OutlineAlpha");
-        private static readonly int PROP_OutlineFade    = Shader.PropertyToID("_OutlineFade");
-        private static readonly int PROP_MaskFadeOnly   = Shader.PropertyToID("_MaskFadeOnly");
+        private static readonly int PROP_MaskBodyFlag = Shader.PropertyToID("_MaskBodyFlag");
+        private static readonly int PROP_OutlineAlpha = Shader.PropertyToID("_OutlineAlpha");
+        private static readonly int PROP_OutlineFade = Shader.PropertyToID("_OutlineFade");
+        private static readonly int PROP_MaskFadeOnly = Shader.PropertyToID("_MaskFadeOnly");
 
         // Amortized draw-list builder: the rebuild is spread across frames with a
         // state machine (bounded slice per frame into scratch lists, swapped into
         // the live lists at Finalize so the CB replay never sees a half-built list).
         private enum BuildPhase { Idle, Items, Containers, Bodies, Finalize }
         private BuildPhase _buildPhase = BuildPhase.Idle;
-        private int   _buildCursor;
+        private int _buildCursor;
         private float _lastPassStartTime = -999f;
         private const float PassIntervalSeconds = 0.25f;
         // Set by the cache coroutine when it finishes building entries a pass
@@ -226,14 +230,14 @@ namespace ABI_H.Drawer
         private bool _cacheBuiltSincePass;
         private const float EarlyPassMinSeconds = 0.1f;
         // Per-frame slice sizes; items dominate scene-wide so they get the most.
-        private const int ItemsPerFrame      = 192;
+        private const int ItemsPerFrame = 192;
         private const int ContainersPerFrame = 48;
-        private const int BodiesPerFrame     = 24;
+        private const int BodiesPerFrame = 24;
         // Snapshot held for the duration of one multi-frame pass.
-        private Vector3 _passPlayerPos, _passCamPos;
-        private float   _passRange, _passPrefilterSqr, _passInteractHideSqr;
-        private bool    _passDiag;
-        private int     _diagInRange, _diagOwned, _diagQueued;
+        private Vector3 _passPlayerPos;
+        private float _passRange, _passPrefilterSqr;
+        private bool _passDiag;
+        private int _diagInRange, _diagOwned, _diagQueued;
         private readonly List<Player> _seenSnapshot = new List<Player>();
         private readonly List<DrawObject> _drawObjectsScratch = new List<DrawObject>();
         // CB rebuild throttle (~30Hz). The attached CB replays every frame anyway;
@@ -241,19 +245,24 @@ namespace ABI_H.Drawer
         // Time-based so low-FPS machines still rebuild every frame; _drawListDirty
         // forces a rebuild the moment a pass publishes.
         private float _lastRebuildTime = -999f;
-        private bool  _drawListDirty;
+        private bool _drawListDirty;
         private const float RebuildMinInterval = 1f / 30f;
+        // Resampling can change the camera target without changing the draw list.
+        // CommandBuffers record temporary RT dimensions and pixel-derived outline
+        // width, so those values must be refreshed when the render size changes.
+        private int _recordedCameraWidth  = -1;
+        private int _recordedCameraHeight = -1;
+        private int _recordedScreenWidth  = -1;
+        private int _recordedScreenHeight = -1;
+        private int _recordedTargetTextureId = -1;
+        private int _recordedTargetWidth    = -1;
+        private int _recordedTargetHeight   = -1;
 
         private const int RootExpansionRendererCap = 32;
 
         // Items with a largest axis below this (meters) are never outlined -
         // filters shell casings and similar debris. Fixed on purpose.
         private const float MinItemSize = 0.05f;
-
-        // Held-weapon exclusion: the first-person weapon's LootItem hierarchy never
-        // reaches the player transform, so anything this close to the eye camera
-        // is treated as held. Shelf/counter items sit 1.5m+ away when lootable.
-        private const float HeldItemExclusionRadius = 1.2f;
 
         private readonly Plane[] _frustumPlanes = new Plane[6];
 
@@ -264,13 +273,13 @@ namespace ABI_H.Drawer
         // Pooled scratch, reused to avoid per-frame/per-tick GC
         private Matrix4x4[] _matrixBuffer = new Matrix4x4[16];
         private readonly HashSet<Transform> _playerTransforms = new HashSet<Transform>();
-        private readonly HashSet<string>    _equippedItemIds  = new HashSet<string>();
-        private readonly List<int>          _staleIds         = new List<int>();
+        private readonly HashSet<string> _equippedItemIds = new HashSet<string>();
+        private readonly List<int> _staleIds = new List<int>();
 
         // Nearest-N cap sort (delegate cached in Awake to avoid per-tick alloc)
         private Vector3 _drawSortOrigin;
         private Comparison<DrawObject> _drawSortCmp;
-        
+
 
         // Wake up, gordon freeman
         private void Awake()
@@ -288,8 +297,8 @@ namespace ABI_H.Drawer
 
             _useThreePass = !_useMaskEdge &&
                 Plugin.StencilShader != null &&
-                Plugin.DrawShader    != null &&
-                Plugin.ClearShader   != null;
+                Plugin.DrawShader != null &&
+                Plugin.ClearShader != null;
 
             if (_useMaskEdge)
             {
@@ -308,12 +317,12 @@ namespace ABI_H.Drawer
             else if (_useThreePass)
             {
                 _itemStencilMat = new Material(Plugin.StencilShader) { hideFlags = HideFlags.HideAndDontSave, renderQueue = 3000 };
-                _itemDrawMat    = new Material(Plugin.DrawShader)    { hideFlags = HideFlags.HideAndDontSave, renderQueue = 3050 };
-                _itemClearMat   = new Material(Plugin.ClearShader)   { hideFlags = HideFlags.HideAndDontSave, renderQueue = 3100 };
+                _itemDrawMat = new Material(Plugin.DrawShader) { hideFlags = HideFlags.HideAndDontSave, renderQueue = 3050 };
+                _itemClearMat = new Material(Plugin.ClearShader) { hideFlags = HideFlags.HideAndDontSave, renderQueue = 3100 };
                 _contStencilMat = new Material(Plugin.StencilShader) { hideFlags = HideFlags.HideAndDontSave, renderQueue = 3000 };
-                _contDrawMat    = new Material(Plugin.DrawShader)    { hideFlags = HideFlags.HideAndDontSave, renderQueue = 3050 };
-                _contClearMat   = new Material(Plugin.ClearShader)   { hideFlags = HideFlags.HideAndDontSave, renderQueue = 3100 };
-                _bodyDrawMat    = new Material(Plugin.DrawShader)    { hideFlags = HideFlags.HideAndDontSave, renderQueue = 3050 };
+                _contDrawMat = new Material(Plugin.DrawShader) { hideFlags = HideFlags.HideAndDontSave, renderQueue = 3050 };
+                _contClearMat = new Material(Plugin.ClearShader) { hideFlags = HideFlags.HideAndDontSave, renderQueue = 3100 };
+                _bodyDrawMat = new Material(Plugin.DrawShader) { hideFlags = HideFlags.HideAndDontSave, renderQueue = 3050 };
 
                 // Stencil must be a pure depth-independent silhouette projection,
                 // otherwise self-occluded faces leave gaps the draw pass bleeds through as jagged lines
@@ -321,7 +330,7 @@ namespace ABI_H.Drawer
                 foreach (var m in new[] { _itemStencilMat, _contStencilMat,
                                           _itemClearMat,   _contClearMat })
                 {
-                    m.SetInt("_ZTest",  zAlways);
+                    m.SetInt("_ZTest", zAlways);
                     m.SetInt("_ZWrite", 0);
                 }
 
@@ -368,15 +377,22 @@ namespace ABI_H.Drawer
 
         private void Update()
         {
-            if (!Plugin.Enabled.Value)
+            if (!Plugin.GlobalOutlineToggle.Value)
             {
                 DetachCommandBuffer();
+                _cmd?.Clear();
                 return;
             }
 
             _mainCam = ResolveFpsCamera();
+            var gameWorld = Singleton<GameWorld>.Instance;
+            _limitOpacityForNightVision = Plugin.LimitNightVisionOpacity.Value
+                && Plugin.IsNightVisionActive(gameWorld?.MainPlayer);
 
             if (_useShader) EnsureCommandBufferAttached();
+
+            if (_useMaskEdge || _useThreePass)
+                _drawListDirty |= RenderDimensionsChanged();
 
             // Rebuild the CB from the current draw list, throttled to ~30Hz.
             // The attached CB keeps replaying the last build in between.
@@ -385,9 +401,11 @@ namespace ABI_H.Drawer
                 float nowRb = Time.realtimeSinceStartup;
                 if (_drawListDirty || nowRb - _lastRebuildTime >= RebuildMinInterval)
                 {
+                    float drawStart = Time.realtimeSinceStartup;
                     RebuildMaskEdgeCommandBuffer();
+                    LogDrawPerformance("mask-edge", drawStart);
                     _lastRebuildTime = nowRb;
-                    _drawListDirty   = false;
+                    _drawListDirty = false;
                 }
             }
             else if (_useThreePass)
@@ -395,17 +413,42 @@ namespace ABI_H.Drawer
                 float nowRb = Time.realtimeSinceStartup;
                 if (_drawListDirty || nowRb - _lastRebuildTime >= RebuildMinInterval)
                 {
+                    float drawStart = Time.realtimeSinceStartup;
                     RebuildThreePassCommandBuffer();
+                    LogDrawPerformance("three-pass", drawStart);
                     _lastRebuildTime = nowRb;
-                    _drawListDirty   = false;
+                    _drawListDirty = false;
                 }
             }
-            else if (_useShader) SubmitLegacyDraws();
+            else if (_useShader)
+            {
+                float drawStart = Time.realtimeSinceStartup;
+                SubmitLegacyDraws();
+                LogDrawPerformance("legacy", drawStart);
+            }
 
             // Advance the amortized draw-list build by one slice.
             StepDrawListBuilder();
+
+            // Try hooking controller
+            TryHookSearchController();
         }
 
+        private void LogDrawPerformance(string pipeline, float startedAt)
+        {
+            if (!Plugin.DebugLogging.Value) return;
+
+            var cam = _attachedCam;
+            int width = cam != null ? cam.pixelWidth : 0;
+            int height = cam != null ? cam.pixelHeight : 0;
+            Plugin.LogSource?.LogInfo(
+                $"[BreakoutOutline][PERF][DRAW] pipeline={pipeline} " +
+                $"ms={(Time.realtimeSinceStartup - startedAt) * 1000f:F3} " +
+                $"objects={_drawObjects.Count} visible={_visibleIdxScratch.Count} " +
+                $"resolution={width}x{height} cacheQueue={_cacheQueue.Count}");
+        }
+
+        // ReSharper disable Unity.PerformanceAnalysis
         private void StepDrawListBuilder()
         {
             var gameWorld = Singleton<GameWorld>.Instance;
@@ -428,10 +471,10 @@ namespace ABI_H.Drawer
                          _cacheBuiltSincePass && _cacheQueue.Count == 0))
                         BeginPass(gameWorld);
                     break;
-                case BuildPhase.Items:      StepItemsPhase();      break;
+                case BuildPhase.Items: StepItemsPhase(); break;
                 case BuildPhase.Containers: StepContainersPhase(); break;
-                case BuildPhase.Bodies:     StepBodiesPhase();     break;
-                case BuildPhase.Finalize:   FinalizePass();        break;
+                case BuildPhase.Bodies: StepBodiesPhase(); break;
+                case BuildPhase.Finalize: FinalizePass(); break;
             }
         }
 
@@ -442,17 +485,9 @@ namespace ABI_H.Drawer
             _cacheBuiltSincePass = false;
 
             _passPlayerPos = gameWorld.MainPlayer.Transform.position;
-            _passRange     = Plugin.DetectionRange.Value;
+            _passRange = Plugin.DetectionRange.Value;
             float prefilter = _passRange + 2f;
             _passPrefilterSqr = prefilter * prefilter;
-            float interactHide = Plugin.InteractHideDistance.Value;
-            _passInteractHideSqr = interactHide * interactHide;
-
-            // camPos drives only the held-item exclusion (never ownership - the camera sits ~1.7m above the feet and would flag shelf loot)
-            _passCamPos = _attachedCam != null
-                ? _attachedCam.transform.position
-                : (_mainCam != null ? _mainCam.transform.position : _passPlayerPos + Vector3.up * 1.7f);
-
             // Drop destroyed Player refs (despawned corpses) so the seen set
             // doesn't accumulate across a long raid
             _seenPlayers.RemoveWhere(_destroyedPlayer);
@@ -470,7 +505,7 @@ namespace ABI_H.Drawer
                 _playerTransforms.Add(mpMb.transform);
             if (Time.realtimeSinceStartup - _mainEquipBuiltAt >= MainEquipRefreshSeconds)
             {
-                _mainEquipIds     = CollectEquippedIds(gameWorld.MainPlayer);
+                _mainEquipIds = CollectEquippedIds(gameWorld.MainPlayer);
                 _mainEquipBuiltAt = Time.realtimeSinceStartup;
             }
             for (int mi = 0; mi < _mainEquipIds.Length; mi++)
@@ -516,7 +551,7 @@ namespace ABI_H.Drawer
                     {
                         ce = new CorpseEquip
                         {
-                            Ids     = CollectEquippedIds(dp),
+                            Ids = CollectEquippedIds(dp),
                             BuiltAt = Time.realtimeSinceStartup,
                         };
                         _corpseEquipCache[cid] = ce;
@@ -580,7 +615,7 @@ namespace ABI_H.Drawer
 
             _diagInRange = _diagOwned = _diagQueued = 0;
             _buildCursor = 0;
-            _buildPhase  = BuildPhase.Items;
+            _buildPhase = BuildPhase.Items;
         }
 
         // Phase 1 - loose loot, sliced ItemsPerFrame at a time.
@@ -589,23 +624,23 @@ namespace ABI_H.Drawer
             if (!Plugin.OutlineLooseItems.Value || _lootItemsSnapshot.Count == 0)
             {
                 _buildCursor = 0;
-                _buildPhase  = BuildPhase.Containers;
+                _buildPhase = BuildPhase.Containers;
                 return;
             }
-        
+
             int end = Mathf.Min(_buildCursor + ItemsPerFrame, _lootItemsSnapshot.Count);
             for (int i = _buildCursor; i < end; i++)
             {
                 var li = _lootItemsSnapshot[i];
                 if (li == null || li.gameObject == null) continue;
-                
+
                 // Skip items that are not active or have no active renderers
                 if (!li.gameObject.activeInHierarchy)
                 {
                     _activeThisTick.Add(li.gameObject.GetInstanceID());
                     continue;
                 }
-        
+
                 // Check if there are any active renderers, if none, it's not spawned yet
                 var renderers = li.gameObject.GetComponentsInChildren<Renderer>(false);
                 if (renderers.Length == 0)
@@ -613,17 +648,13 @@ namespace ABI_H.Drawer
                     _activeThisTick.Add(li.gameObject.GetInstanceID());
                     continue;
                 }
-        
-                // deprecate
+
                 float dSqr = (li.transform.position - _passPlayerPos).sqrMagnitude;
+
                 if (dSqr > _passPrefilterSqr) continue;
-                if (_passInteractHideSqr > 0f && dSqr < _passInteractHideSqr)
-                {
-                    _activeThisTick.Add(li.gameObject.GetInstanceID());
-                    continue;
-                }
+
                 _diagInRange++;
-                if (!HasResolvableItem(li)) continue;
+
                 if (IsOwnedByAnyPlayer(li, _playerTransforms, _equippedItemIds))
                 {
                     _diagOwned++;
@@ -634,12 +665,11 @@ namespace ABI_H.Drawer
                 if (IsOnDeadBody(li.transform.position, _deadBodyPositions)) continue;
                 _diagQueued++;
                 LogQueuedDiag(_passDiag, li);
-                GatherTarget(li.gameObject, _passPlayerPos, _passCamPos, _passRange,
-                             applyHeldExclusion: true,
+                GatherTarget(li.gameObject, _passPlayerPos, _passRange,
                              expandToPrefabRoot: false,
                              isContainer: false);
             }
-        
+
             _buildCursor = end;
             if (_buildCursor >= _lootItemsSnapshot.Count)
             {
@@ -648,7 +678,7 @@ namespace ABI_H.Drawer
                         $"[BreakoutOutline] loose-item scan: LootItem={_lootItemsSnapshot.Count}, " +
                         $"inRange={_diagInRange}, ownedRejected={_diagOwned}, queued={_diagQueued}");
                 _buildCursor = 0;
-                _buildPhase  = BuildPhase.Containers;
+                _buildPhase = BuildPhase.Containers;
             }
         }
 
@@ -658,7 +688,7 @@ namespace ABI_H.Drawer
             if (!Plugin.OutlineContainers.Value || _containerCache.Length == 0)
             {
                 _buildCursor = 0;
-                _buildPhase  = BuildPhase.Bodies;
+                _buildPhase = BuildPhase.Bodies;
                 return;
             }
 
@@ -672,12 +702,12 @@ namespace ABI_H.Drawer
                 // but we draw cached meshes ourselves - a culled container keeps its outline (bounds fall back to the cached AABB)
                 if ((c.transform.position - _passPlayerPos).sqrMagnitude > _passPrefilterSqr) continue;
                 // Skip container spawn points with no loot. EFT can have an
-                // initialized ItemOwner with an empty grid, so a null check isn't
-                // sufficient - we need at least one item beyond the container's root
-                if (!ContainerHasLoot(c)) continue;
+                // initialized ItemOwner with an empty grid, so dont do a null check here.
+                if (!ContainerHasLoot(c) && Plugin.OutlineEmptyContainers.Value) continue;
+                // Searched container already? Skip
+                if (Plugin.HideSearchedContainers.Value && ContainerHasBeenSearched(c)) continue;
                 if (_playerTransforms.Contains(c.transform.root)) continue;
-                GatherTarget(c.gameObject, _passPlayerPos, _passCamPos, _passRange,
-                             applyHeldExclusion: false,
+                GatherTarget(c.gameObject, _passPlayerPos, _passRange,
                              expandToPrefabRoot: true,
                              isContainer: true);
             }
@@ -686,7 +716,7 @@ namespace ABI_H.Drawer
             if (_buildCursor >= _containerCache.Length)
             {
                 _buildCursor = 0;
-                _buildPhase  = BuildPhase.Bodies;
+                _buildPhase = BuildPhase.Bodies;
             }
         }
 
@@ -743,6 +773,9 @@ namespace ABI_H.Drawer
         // Full reset when the GameWorld (raid) goes away. Also re-arms the builder state machine so the next raid starts a clean pass
         private void ResetWorldState()
         {
+            DetachCommandBuffer();
+            _mainCam = null;
+            _limitOpacityForNightVision = false;
             foreach (var kv in _rendererCache) ReleaseCorpseSmrs(kv.Value);
             _drawObjects.Clear();
             _drawObjectsScratch.Clear();
@@ -755,22 +788,21 @@ namespace ABI_H.Drawer
             _seenPlayers.Clear();
             _seenSnapshot.Clear();
             _deadBodyPositions.Clear();
-            _containerCache         = Array.Empty<LootableContainer>();
-            _containerCacheTryTime  = -999f;
+            _containerCache = Array.Empty<LootableContainer>();
+            _containerCacheTryTime = -999f;
             _containerLootCache.Clear();
-            _lootItemCache          = Array.Empty<LootItem>();
+            _lootItemCache = Array.Empty<LootItem>();
             _lootItemCacheBuildTime = -999f;
             _lootItemsSnapshot.Clear();
-            _mainEquipIds     = Array.Empty<string>();
+            _mainEquipIds = Array.Empty<string>();
             _mainEquipBuiltAt = -999f;
-            _buildPhase  = BuildPhase.Idle;
+            _buildPhase = BuildPhase.Idle;
             _buildCursor = 0;
         }
 
         // Target gathering
 
-        private void GatherTarget(GameObject go, Vector3 playerPos, Vector3 camPos,
-                                  float range, bool applyHeldExclusion,
+        private void GatherTarget(GameObject go, Vector3 playerPos, float range,
                                   bool expandToPrefabRoot, bool isContainer,
                                   bool bodyOnly = false,
                                   Vector3? worldPosOverride = null)
@@ -788,10 +820,6 @@ namespace ABI_H.Drawer
             // override.
             Vector3 worldPos = worldPosOverride ?? go.transform.position;
             if (Vector3.Distance(playerPos, worldPos) > range) return;
-            if (applyHeldExclusion &&
-                Vector3.Distance(camPos, worldPos) < HeldItemExclusionRadius)
-                return;
-
             if (!_rendererCache.TryGetValue(id, out var cached))
             {
                 // Cache miss - enqueue for async build (appears within a few
@@ -819,21 +847,21 @@ namespace ABI_H.Drawer
             {
                 Vector3 s = cached.Bounds.size;
                 float largest = Mathf.Max(s.x, Mathf.Max(s.y, s.z));
+
                 if (largest < MinItemSize) return;
             }
 
             // Append to the scratch lists; published atomically at FinalizePass.
-            float fade = Mathf.Clamp01(1f - Vector3.Distance(playerPos, worldPos)
-                                       / Mathf.Max(range, 0.001f));
-            _drawObjectsScratch.Add(new DrawObject(cached.Entries, isContainer, cached.Bounds,
-                                                   fade, bodyOnly));
+            float fade = Mathf.Clamp01(1f - Vector3.Distance(playerPos, worldPos) / Mathf.Max(range, 0.001f));
+
+            _drawObjectsScratch.Add(new DrawObject(id, cached.Entries, isContainer, cached.Bounds, fade, bodyOnly));
         }
 
         private static RendererData CollectRenderers(GameObject go, bool expandToPrefabRoot, bool bodyOnly = false)
         {
             var entries = new List<MeshEntry>();
             Bounds combined = default;
-            bool   hasBounds = false;
+            bool hasBounds = false;
 
             // includeInactive must be FALSE for containers: many container prefabs
             // hold several visual variants with only one active per raid, and the
@@ -903,8 +931,8 @@ namespace ABI_H.Drawer
             // its SIBLINGS' meshes - a ghost outline around neighbouring props
             if (expandToPrefabRoot && !bodyOnly && go.activeInHierarchy)
             {
-                const int MaxParentChildren    = 12;
-                const int MaxWalkUpLevels      = 2;
+                const int MaxParentChildren = 12;
+                const int MaxWalkUpLevels = 2;
                 Transform p = go.transform.parent;
                 for (int w = 0; w < MaxWalkUpLevels && p != null; w++)
                 {
@@ -1008,181 +1036,14 @@ namespace ABI_H.Drawer
             return false;
         }
 
-        // Populates the pooled _playerTransforms / _equippedItemIds for one player.
-        // Typed as `object` to avoid referencing IPlayer directly (drags in the
-        // DissonanceVoip assembly); every IPlayer is a Player at runtime.
-        // Top-level equipment IDs only - the deep nested-mod walk is only needed
-        // for the local player and corpses, via the TTL-cached CollectEquippedIds.
-        private void AddPlayerToScratch(object obj)
+        private Color GetOutlineColor(bool isContainer)
         {
-            if (obj == null) return;
-            var mb = obj as MonoBehaviour;
-            if (mb != null)
-            {
-                // NOT transform.root - in EFT that's a scene-level parent shared
-                // with every LootItem, which would suppress all loose loot.
-                _playerTransforms.Add(mb.transform);
-            }
-            var p = obj as Player;
-            if (p == null) return;
-
-            try
-            {
-                var profile = p.Profile;
-                var inv = profile?.Inventory;
-                if (inv == null) return;
-                foreach (var top in inv.GetPlayerItems(EPlayerItems.Equipment))
-                {
-                    if (top != null && top.Id != null) _equippedItemIds.Add(top.Id);
-                }
-            }
-            catch { /* defensive - transient Profile/Inventory null during spawn/respawn */ }
-        }
-
-        // Deep-collects a player's equipped item IDs (top-level gear + every
-        // nested child) into a fresh array, so callers can cache the result.
-        private string[] CollectEquippedIds(Player p)
-        {
-            _equipScratch.Clear();
-            try
-            {
-                var inv = p?.Profile?.Inventory;
-                if (inv != null)
-                {
-                    foreach (var top in inv.GetPlayerItems(EPlayerItems.Equipment))
-                    {
-                        if (top == null) continue;
-                        if (top.Id != null) _equipScratch.Add(top.Id);
-                        try
-                        {
-                            foreach (var child in top.GetAllItems())
-                                if (child != null && child.Id != null)
-                                    _equipScratch.Add(child.Id);
-                        }
-                        catch { /* item type may not expose GetAllItems */ }
-                    }
-                }
-            }
-            catch { /* transient Profile/Inventory null during spawn/respawn */ }
-            return _equipScratch.Count > 0 ? _equipScratch.ToArray() : Array.Empty<string>();
-        }
-
-        // True when a position is close enough to a dead body that the item
-        // likely fell with the ragdoll (suppressed so it doesn't overlap the
-        // body outline).
-        private static bool IsOnDeadBody(Vector3 pos, List<Vector3> deadBodyPositions)
-        {
-            foreach (var bp in deadBodyPositions)
-                if ((pos - bp).sqrMagnitude < BodyWeaponSuppressRadiusSqr) return true;
-            return false;
-        }
-
-        // Debug log: one line per unique item name that will be outlined.
-        private void LogQueuedDiag(bool diag, LootItem li)
-        {
-            if (!diag || li == null || li.gameObject == null) return;
-            string n = li.gameObject.name;
-            if (!_loggedQueued.Add(n)) return;
-            string id = "?";
-            bool   has = false;
-            try
-            {
-                var it = li.Item;
-                if (it != null)
-                {
-                    id  = it.Id ?? "null";
-                    has = it.Id != null && _equippedItemIds.Contains(it.Id);
-                }
-            }
-            catch { id = "<throw>"; }
-            Plugin.LogSource?.LogInfo(
-                $"[BreakoutOutline] QUEUED '{n}' id={id} equippedHas={has} equippedCount={_equippedItemIds.Count}");
-        }
-
-        // A LootItem whose backing Item has no resolvable Id is an in-hand weapon
-        // (or one of its mod parts), not droppable world loot - floor loot always
-        // resolves a non-null Item.Id. Skipping these filters bot-held guns and
-        // per-mod duplicates of loose weapons.
-        private static bool HasResolvableItem(LootItem li)
-        {
-            try { var it = li.Item; return it != null && it.Id != null; }
-            catch { return false; }
-        }
-
-        private static bool IsOwnedByAnyPlayer(LootItem li,
-                                               HashSet<Transform> playerTransforms,
-                                               HashSet<string> equippedItemIds)
-        {
-            // 1. Item-id match against every player's equipped inventory.
-            try
-            {
-                var item = li.Item;
-                if (item != null && item.Id != null && equippedItemIds.Contains(item.Id))
-                    return true;
-            }
-            catch { /* LootItem.Item can throw on some transient states */ }
-
-            var go = li.gameObject;
-
-            // 2. Parent chain - catches items still parented under a player /
-            //    dead-body skeleton, e.g. rigid attachments.
-            var t = go.transform;
-            while (t != null)
-            {
-                if (playerTransforms.Contains(t)) return true;
-                t = t.parent;
-            }
-
-            return false;
-        }
-
-        // Compound-item detection via "Slots"/"Grids" properties (avoids a direct
-        // CompoundItem reference); cached per Type.
-        private static readonly Dictionary<Type, bool> _isCompoundTypeCache = new Dictionary<Type, bool>();
-        private static bool IsCompoundItemType(Type t)
-        {
-            if (_isCompoundTypeCache.TryGetValue(t, out bool cached)) return cached;
-            bool isCompound = t.GetProperty("Slots") != null
-                           || t.GetProperty("Grids") != null;
-            _isCompoundTypeCache[t] = isCompound;
-            return isCompound;
-        }
-
-        private bool ContainerHasLoot(LootableContainer c)
-        {
-            int id = c.gameObject.GetInstanceID();
-            float now = Time.realtimeSinceStartup;
-            if (_containerLootCache.TryGetValue(id, out var cl) &&
-                now - cl.At < ContainerLootTtlSeconds)
-                return cl.Has;
-
-            bool has = ComputeContainerHasLoot(c);
-            _containerLootCache[id] = new ContainerLoot { Has = has, At = now };
-            return has;
-        }
-
-        private static bool ComputeContainerHasLoot(LootableContainer c)
-        {
-            try
-            {
-                var owner = c.ItemOwner;
-                if (owner == null) return false;
-                var root = owner.RootItem;
-                if (root == null) return false;
-
-                // Only NON-compound items count as real loot: compound sub-items
-                // (grid wrappers, a PC's internal case slot) are structural and
-                // present even in empty containers, while populated containers
-                // always have at least one non-compound leaf.
-                foreach (var item in root.GetAllItems())
-                {
-                    if (ReferenceEquals(item, root)) continue;
-                    if (IsCompoundItemType(item.GetType())) continue;
-                    return true;
-                }
-                return false;
-            }
-            catch { return false; }
+            Color color = isContainer
+                ? Plugin.ContainerOutlineColor.Value
+                : Plugin.ItemOutlineColor.Value;
+            if (_limitOpacityForNightVision && color.a > 0.5f)
+                color.a = 0.5f;
+            return color;
         }
 
         // Mask + edge CB build: render every culled-in object's silhouette into a
@@ -1195,6 +1056,7 @@ namespace ABI_H.Drawer
 
             var cam = _attachedCam;
             if (cam == null) return;
+            RecordRenderDimensions(cam);
 
             // "Line of Sight Check" toggles per-pixel depth occlusion and gates the depth prepass.
             // Applied before the empty-list early-out so switching LOS off releases the forced prepass even with nothing outlined.
@@ -1207,9 +1069,9 @@ namespace ABI_H.Drawer
             Vector3 camFwd = cam.transform.forward;
             GeometryUtility.CalculateFrustumPlanes(cam, _frustumPlanes);
 
-            Color itemColor = Plugin.ItemOutlineColor.Value;
-            Color contColor = Plugin.ContainerOutlineColor.Value;
-            float bodyBias  = Plugin.BodyDepthBias.Value;
+            Color itemColor = GetOutlineColor(false);
+            Color contColor = GetOutlineColor(true);
+            float bodyBias = Plugin.BodyDepthBias.Value;
 
             // Cull first
             // If nothing survives (all outlined objects behind the camera / out of
@@ -1243,8 +1105,13 @@ namespace ABI_H.Drawer
 
             // Mask RT: RGB = colour, A = signed eye-depth doubling as the filled
             // marker. No depth buffer - occlusion is per-pixel in the shader
-            int w = Mathf.Max(1, cam.pixelWidth);
-            int h = Mathf.Max(1, cam.pixelHeight);
+            // Match the target viewport
+            int w = cam.targetTexture != null
+                ? Mathf.Max(1, cam.targetTexture.width)
+                : Mathf.Max(1, cam.pixelWidth);
+            int h = cam.targetTexture != null
+                ? Mathf.Max(1, cam.targetTexture.height)
+                : Mathf.Max(1, cam.pixelHeight);
             _cmd.GetTemporaryRT(_maskRtId, w, h, 0, FilterMode.Bilinear, RenderTextureFormat.ARGBHalf);
             _cmd.GetTemporaryRT(_fadeRtId, w, h, 0, FilterMode.Bilinear, RenderTextureFormat.RHalf);
             _cmd.SetRenderTarget(_maskRtId);
@@ -1256,7 +1123,7 @@ namespace ABI_H.Drawer
                 var d = _drawObjects[_visibleIdxScratch[vi]];
 
                 Color color = d.IsContainer ? contColor : itemColor; // bodies = container colour
-                float bias  = d.IsBody ? bodyBias : ItemDepthBias;
+                float bias = d.IsBody ? bodyBias : ItemDepthBias;
 
                 int n = d.Entries.Length;
                 if (_matrixBuffer.Length < n)
@@ -1274,9 +1141,9 @@ namespace ABI_H.Drawer
                 _mpb.Clear();
                 _mpb.SetColor(PROP_OutlineColor, color);
                 _mpb.SetFloat(PROP_DepthOcclude, occl);
-                _mpb.SetFloat(PROP_DepthBias,    bias);
+                _mpb.SetFloat(PROP_DepthBias, bias);
                 _mpb.SetFloat(PROP_MaskBodyFlag, d.IsBody ? 1f : 0f);
-                _mpb.SetFloat(PROP_OutlineFade,  d.Fade);
+                _mpb.SetFloat(PROP_OutlineFade, d.Fade);
                 _mpb.SetFloat(PROP_MaskFadeOnly, 0f);
                 for (int i = 0; i < n; i++)
                 {
@@ -1295,9 +1162,9 @@ namespace ABI_H.Drawer
                 {
                     _cmd.SetGlobalColor(PROP_OutlineColor, color);
                     _cmd.SetGlobalFloat(PROP_DepthOcclude, occl);
-                    _cmd.SetGlobalFloat(PROP_DepthBias,    bias);
+                    _cmd.SetGlobalFloat(PROP_DepthBias, bias);
                     _cmd.SetGlobalFloat(PROP_MaskBodyFlag, d.IsBody ? 1f : 0f);
-                    _cmd.SetGlobalFloat(PROP_OutlineFade,  d.Fade);
+                    _cmd.SetGlobalFloat(PROP_OutlineFade, d.Fade);
                     _cmd.SetGlobalFloat(PROP_MaskFadeOnly, 0f);
                     for (int i = 0; i < n; i++)
                     {
@@ -1325,10 +1192,12 @@ namespace ABI_H.Drawer
             // so prone-corpse rings survive the floor they lie on
             float widthPx = Plugin.OutlineWidth.Value;
             _edgeMat.SetFloat(PROP_OutlineWidthPx, widthPx);
-            _edgeMat.SetFloat(PROP_EdgeOcclude,    occl);
+            _edgeMat.SetFloat(PROP_EdgeOcclude, occl);
             _edgeMat.SetFloat(PROP_EdgeDepthBiasItem, EdgeItemDepthBias);
             _edgeMat.SetFloat(PROP_EdgeDepthBiasBody, bodyBias);
-            _edgeMat.SetFloat(PROP_OutlineAlpha,   Mathf.Max(itemColor.a, contColor.a));
+            // Per-object colour alpha is already folded into the companion fade
+            // mask, so the edge pass must not replace it with a global alpha.
+            _edgeMat.SetFloat(PROP_OutlineAlpha, 1f);
             _cmd.SetGlobalTexture("_FadeTex", _fadeRtId);
 
             _cmd.Blit(_maskRtId, BuiltinRenderTextureType.CameraTarget, _edgeMat);
@@ -1341,6 +1210,8 @@ namespace ABI_H.Drawer
             for (int vi = 0; vi < _visibleIdxScratch.Count; vi++)
             {
                 var d = _drawObjects[_visibleIdxScratch[vi]];
+                Color objectColor = GetOutlineColor(d.IsContainer);
+                float opacity = objectColor.a * d.Fade;
                 int n = d.Entries.Length;
                 if (_matrixBuffer.Length < n)
                     _matrixBuffer = new Matrix4x4[Mathf.Max(n, _matrixBuffer.Length * 2)];
@@ -1354,7 +1225,7 @@ namespace ABI_H.Drawer
                 }
 
                 _mpb.Clear();
-                _mpb.SetFloat(PROP_OutlineFade, d.Fade);
+                _mpb.SetFloat(PROP_OutlineFade, opacity);
                 _mpb.SetFloat(PROP_MaskFadeOnly, 1f);
                 _mpb.SetFloat(PROP_DepthOcclude, occl);
                 for (int i = 0; i < n; i++)
@@ -1370,7 +1241,7 @@ namespace ABI_H.Drawer
                     if (d.Entries[i].Smr != null) { anySmr = true; break; }
                 if (!anySmr) continue;
 
-                _cmd.SetGlobalFloat(PROP_OutlineFade, d.Fade);
+                _cmd.SetGlobalFloat(PROP_OutlineFade, opacity);
                 _cmd.SetGlobalFloat(PROP_MaskFadeOnly, 1f);
                 _cmd.SetGlobalFloat(PROP_DepthOcclude, occl);
                 for (int i = 0; i < n; i++)
@@ -1395,17 +1266,21 @@ namespace ABI_H.Drawer
             if (_drawObjects.Count == 0) return;
 
             // Convert outline width from screen pixels (config) to NDC units NDC vertical span is 2 units, so each pixel ≈ 2 / Screen.height NDC units
-            float widthPx  = Plugin.OutlineWidth.Value;
+            float widthPx = Plugin.OutlineWidth.Value;
             float widthNdc = (Screen.height > 0)
                 ? widthPx * 2f / Screen.height
                 : widthPx * 0.003f;
 
-            Color itemColor = Plugin.ItemOutlineColor.Value;
-            Color contColor = Plugin.ContainerOutlineColor.Value;
+            Color itemColor = GetOutlineColor(false);
+            Color contColor = GetOutlineColor(true);
 
-            // Must be _attachedCam (the camera the CB executes on) - Camera.main can return a wide-FOV environment camera
+            // Must be _attachedCam (the camera the CB executes on), not a different scene camera
             var cam = _attachedCam;
             if (cam == null) return;
+
+            // Record our camera dimension (later on compare) in case if DLSS/FSR/whateverthefuck is enabled
+            // WE NEED the actual RT size to compute!!!
+            RecordRenderDimensions(cam);
             Vector3 camPos = cam.transform.position;
             Vector3 camFwd = cam.transform.forward;
             GeometryUtility.CalculateFrustumPlanes(cam, _frustumPlanes);
@@ -1434,10 +1309,10 @@ namespace ABI_H.Drawer
 
                 // Bodies share the container stencil/clear + colour but use their own draw material
                 var stencilMat = d.IsContainer ? _contStencilMat : _itemStencilMat;
-                var drawMat    = d.IsBody ? _bodyDrawMat
+                var drawMat = d.IsBody ? _bodyDrawMat
                                           : (d.IsContainer ? _contDrawMat : _itemDrawMat);
-                var clearMat   = d.IsContainer ? _contClearMat   : _itemClearMat;
-                var color      = d.IsContainer ? contColor       : itemColor;
+                var clearMat = d.IsContainer ? _contClearMat : _itemClearMat;
+                var color = d.IsContainer ? contColor : itemColor;
                 color.a *= d.Fade;
 
                 // Resolve matrices for this object's mesh entries
@@ -1498,8 +1373,8 @@ namespace ABI_H.Drawer
                 {
                     _cmd.SetGlobalVector(PROP_ObjectCenter,
                         new Vector4(centre.x, centre.y, centre.z, liveBounds.extents.magnitude));
-                    _cmd.SetGlobalColor (PROP_OutlineColor, color);
-                    _cmd.SetGlobalFloat (PROP_OutlineWidth, widthNdc);
+                    _cmd.SetGlobalColor(PROP_OutlineColor, color);
+                    _cmd.SetGlobalFloat(PROP_OutlineWidth, widthNdc);
 
                     // Three separate loops (stencil-all - draw-all - clear-all): a
                     // per-SMR trio would draw ring edges between body parts
@@ -1543,103 +1418,11 @@ namespace ABI_H.Drawer
             }
         }
 
-        // Async cache builder
-
-        private IEnumerator CacheBuilderLoop()
-        {
-            // Idles when the queue is empty; otherwise processes up to CacheBudgetSeconds of work per frame.
-            while (true)
-            {
-                if (_cacheQueue.Count == 0)
-                {
-                    yield return null;
-                    continue;
-                }
-
-                float start = Time.realtimeSinceStartup;
-                while (_cacheQueue.Count > 0
-                       && (Time.realtimeSinceStartup - start) < CacheBudgetSeconds)
-                {
-                    var req = _cacheQueue.Dequeue();
-                    _pendingCacheIds.Remove(req.InstanceId);
-
-                    if (req.Go == null) continue;                  // object destroyed
-                    if (_rendererCache.ContainsKey(req.InstanceId))   // raced with another build
-                        continue;
-
-                    var rd = CollectRenderers(req.Go, req.ExpandToPrefabRoot, req.BodyOnly);
-                    if (rd.Entries.Length > 0)
-                    {
-                        _rendererCache[req.InstanceId] = rd;
-                        // A later successful build clears any pending backoff.
-                        _failRetryAt.Remove(req.InstanceId);
-                        // Let the builder state machine start the next pass early
-                        // so this object gets drawn without waiting the interval.
-                        _cacheBuiltSincePass = true;
-                    }
-                    else
-                    {
-                        // Transient failure - back off and retry (ragdoll still
-                        // initialising, or EFT room culling has the renderers
-                        // deactivated from the current position).
-                        _failRetryAt[req.InstanceId] = Time.realtimeSinceStartup
-                            + (req.BodyOnly ? BodyFailRetrySeconds : ItemFailRetrySeconds);
-                        // Debug log, once per unique item name.
-                        if (Plugin.DebugLogging.Value
-                            && !req.BodyOnly && !req.ExpandToPrefabRoot
-                            && _loggedItemFailures.Add(req.Go.name))
-                        {
-                            int totalChildren = req.Go.GetComponentsInChildren<Transform>(true).Length;
-                            int activeRends   = req.Go.GetComponentsInChildren<Renderer>(false).Length;
-                            int allRends      = req.Go.GetComponentsInChildren<Renderer>(true).Length;
-                            Plugin.LogSource?.LogInfo(
-                                $"[BreakoutOutline] Item '{req.Go.name}' produced 0 entries " +
-                                $"(children={totalChildren}, activeRenderers={activeRends}, " +
-                                $"allRenderers={allRends}, activeInHierarchy={req.Go.activeInHierarchy})");
-                        }
-                    }
-                }
-                yield return null;
-            }
-        }
-
         // Cull helpers
         // Deliberately NO Renderer.isVisible anywhere: it reads the cached LOD0
         // renderer and EFT's per-any-camera occlusion culling, both of which go
         // false while an object is plainly on screen. Per-pixel GPU occlusion +
         // the frustum test are the visibility authorities.
-
-        // Draw gate for STATIC entries: the cached renderer must actually be
-        // rendering. EFT hides unspawned container variants by disabling the
-        // Renderer COMPONENT on a still-active GO - includeInactive=false never
-        // filtered those, and drawing them makes ghost outlines at empty spawn
-        // points. Deliberately checks enabled/active, NOT isVisible (isVisible
-        // goes false on plainly-visible objects; see the note below).
-        private static bool EntryAlive(in MeshEntry e)
-        {
-            var r = e.Rend;
-            return r == null || (r.enabled && r.gameObject.activeInHierarchy);
-        }
-
-        // Current world-AABB from each entry's live renderer. Skips disabled/
-        // inactive entries (filters a container's animated lid swap, tracks
-        // ragdolling SMRs). Do NOT skip by isVisible here either - frustum-culled
-        // sub-renderers would shrink the bounds and shift _ObjectCenter.
-        private static bool ComputeLiveBounds(MeshEntry[] entries, out Bounds bounds)
-        {
-            bounds = default;
-            bool seeded = false;
-            foreach (var e in entries)
-            {
-                Renderer r = e.Smr != null ? (Renderer)e.Smr : e.Rend;
-                if (r == null) continue;
-                if (!r.enabled) continue;
-                if (!r.gameObject.activeInHierarchy) continue;
-                Bounds rb = r.bounds;
-                if (seeded) bounds.Encapsulate(rb); else { bounds = rb; seeded = true; }
-            }
-            return seeded;
-        }
 
         // Legacy single-shader path (combined 10-pass material)
 
@@ -1648,9 +1431,9 @@ namespace ABI_H.Drawer
             if (_drawObjects.Count == 0) return;
 
             float w = Plugin.OutlineWidth.Value;
-            _itemMat.SetColor("_OutlineColor", Plugin.ItemOutlineColor.Value);
+            _itemMat.SetColor("_OutlineColor", GetOutlineColor(false));
             _itemMat.SetFloat("_OutlineWidth", w);
-            _contMat.SetColor("_OutlineColor", Plugin.ContainerOutlineColor.Value);
+            _contMat.SetColor("_OutlineColor", GetOutlineColor(true));
             _contMat.SetFloat("_OutlineWidth", w);
 
             // No CommandBuffer on this path, so _attachedCam is never set - cull
@@ -1673,8 +1456,7 @@ namespace ABI_H.Drawer
                 if (!GeometryUtility.TestPlanesAABB(_frustumPlanes, liveBounds)) continue;
 
                 var mat = d.IsContainer ? _contMat : _itemMat;
-                Color color = d.IsContainer ? Plugin.ContainerOutlineColor.Value
-                                            : Plugin.ItemOutlineColor.Value;
+                Color color = GetOutlineColor(d.IsContainer);
                 color.a *= d.Fade;
                 mat.SetColor("_OutlineColor", color);
                 foreach (var e in d.Entries)
@@ -1690,26 +1472,19 @@ namespace ABI_H.Drawer
 
         // CommandBuffer attach/detach
 
-        // CameraManager.Instance.Camera is the real FPS camera; fall back to a name
-        // lookup, then Camera.main. try/catch because Instance can be null during
-        // scene load.
-        private static Camera ResolveFpsCamera()
+        // CameraManager.Instance.Camera is the only supported FPS camera
+        private Camera ResolveFpsCamera()
         {
+            if (_mainCam != null) return _mainCam;
+
             try
             {
                 var inst = CameraManager.Instance;
-                if (inst != null && inst.Camera != null) return inst.Camera;
+                if (inst != null) _mainCam = inst.Camera;
             }
             catch { }
 
-            var all = Camera.allCameras;
-            for (int i = 0; i < all.Length; i++)
-            {
-                var c = all[i];
-                if (c != null && c.name == "FPS Camera") return c;
-            }
-
-            return Camera.main;
+            return _mainCam;
         }
 
         private void EnsureCommandBufferAttached()
@@ -1718,6 +1493,13 @@ namespace ABI_H.Drawer
             var cam = _mainCam;
             if (cam == _attachedCam) return;
             DetachCommandBuffer();
+            _recordedCameraWidth  = -1;
+            _recordedCameraHeight = -1;
+            _recordedScreenWidth  = -1;
+            _recordedScreenHeight = -1;
+            _recordedTargetTextureId = -1;
+            _recordedTargetWidth    = -1;
+            _recordedTargetHeight   = -1;
             if (cam != null)
             {
                 cam.AddCommandBuffer(OutlineEvent, _cmd);
@@ -1729,13 +1511,41 @@ namespace ABI_H.Drawer
             }
         }
 
+        private bool RenderDimensionsChanged()
+        {
+            var cam = _attachedCam;
+            if (cam == null) return false;
+
+            return cam.pixelWidth != _recordedCameraWidth
+                || cam.pixelHeight != _recordedCameraHeight
+                || Screen.width != _recordedScreenWidth
+                || Screen.height != _recordedScreenHeight
+                || (cam.targetTexture != null
+                    ? cam.targetTexture.GetInstanceID()
+                    : 0) != _recordedTargetTextureId
+                || (cam.targetTexture != null ? cam.targetTexture.width : 0) != _recordedTargetWidth
+                || (cam.targetTexture != null ? cam.targetTexture.height : 0) != _recordedTargetHeight;
+        }
+
+        private void RecordRenderDimensions(Camera cam)
+        {
+            _recordedCameraWidth  = cam.pixelWidth;
+            _recordedCameraHeight = cam.pixelHeight;
+            _recordedScreenWidth  = Screen.width;
+            _recordedScreenHeight = Screen.height;
+            var target = cam.targetTexture;
+            _recordedTargetTextureId = target != null ? target.GetInstanceID() : 0;
+            _recordedTargetWidth    = target != null ? target.width : 0;
+            _recordedTargetHeight   = target != null ? target.height : 0;
+        }
+
         // Enable the depth prepass only when occlusion needs it. When LOS is off we
         // restore the camera to whatever EFT had: clear our Depth bit only if EFT
         // wasn't already requesting it (don't fight EFT's own post-FX needs).
         private void ApplyDepthMode(Camera cam, bool losOn)
         {
             if (cam == null) return;
-            if (losOn)              cam.depthTextureMode |=  DepthTextureMode.Depth;
+            if (losOn) cam.depthTextureMode |= DepthTextureMode.Depth;
             else if (!_eftProvidesDepth) cam.depthTextureMode &= ~DepthTextureMode.Depth;
         }
 
@@ -1750,7 +1560,7 @@ namespace ABI_H.Drawer
                     : "NULL(at-Update; may still bind during render)";
 
                 float itemOcc = _itemDrawMat != null ? _itemDrawMat.GetFloat("_DepthOcclude") : -1f;
-                int   itemZ   = _itemDrawMat != null ? _itemDrawMat.GetInt("_ZTest")        : -1;
+                int itemZ = _itemDrawMat != null ? _itemDrawMat.GetInt("_ZTest") : -1;
 
                 Plugin.LogSource?.LogInfo(
                     "[BreakoutOutline][OCCLUSION DIAG] " +
@@ -1773,10 +1583,18 @@ namespace ABI_H.Drawer
             try { _attachedCam.RemoveCommandBuffer(OutlineEvent, _cmd); }
             catch { }
             _attachedCam = null;
+            _recordedCameraWidth  = -1;
+            _recordedCameraHeight = -1;
+            _recordedScreenWidth  = -1;
+            _recordedScreenHeight = -1;
+            _recordedTargetTextureId = -1;
+            _recordedTargetWidth    = -1;
+            _recordedTargetHeight   = -1;
         }
 
         private void OnDestroy()
         {
+            _mainCam = null;
             if (_cacheCoroutine != null) { StopCoroutine(_cacheCoroutine); _cacheCoroutine = null; }
             _cacheQueue.Clear();
             _pendingCacheIds.Clear();
@@ -1789,16 +1607,17 @@ namespace ABI_H.Drawer
             foreach (var kv in _rendererCache) ReleaseCorpseSmrs(kv.Value);
             _rendererCache.Clear();
             _activeThisTick.Clear();
+            _searchedContainers.Clear();
 
             if (_itemStencilMat != null) Destroy(_itemStencilMat);
-            if (_itemDrawMat    != null) Destroy(_itemDrawMat);
-            if (_itemClearMat   != null) Destroy(_itemClearMat);
+            if (_itemDrawMat != null) Destroy(_itemDrawMat);
+            if (_itemClearMat != null) Destroy(_itemClearMat);
             if (_contStencilMat != null) Destroy(_contStencilMat);
-            if (_contDrawMat    != null) Destroy(_contDrawMat);
-            if (_contClearMat   != null) Destroy(_contClearMat);
-            if (_bodyDrawMat    != null) Destroy(_bodyDrawMat);
-            if (_maskMat        != null) Destroy(_maskMat);
-            if (_edgeMat        != null) Destroy(_edgeMat);
+            if (_contDrawMat != null) Destroy(_contDrawMat);
+            if (_contClearMat != null) Destroy(_contClearMat);
+            if (_bodyDrawMat != null) Destroy(_bodyDrawMat);
+            if (_maskMat != null) Destroy(_maskMat);
+            if (_edgeMat != null) Destroy(_edgeMat);
             if (_itemMat != null) Destroy(_itemMat);
             if (_contMat != null) Destroy(_contMat);
         }

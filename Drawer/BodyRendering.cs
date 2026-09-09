@@ -2,7 +2,7 @@ using Comfort.Common;
 using EFT;
 using UnityEngine;
 
-namespace ABI_H.Drawer
+namespace BreakoutOutlines.Drawer
 {
     public partial class LootOutlineController
     {
@@ -28,8 +28,7 @@ namespace ABI_H.Drawer
                 Vector3 bodyPos = p.Transform.position;
                 if ((bodyPos - _passPlayerPos).sqrMagnitude > _passPrefilterSqr) continue;
 
-                GatherTarget(p.gameObject, _passPlayerPos, _passCamPos, _passRange,
-                             applyHeldExclusion: false,
+                GatherTarget(p.gameObject, _passPlayerPos, _passRange,
                              expandToPrefabRoot: false,
                              isContainer: true,
                              bodyOnly: true,

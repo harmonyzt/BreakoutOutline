@@ -41,7 +41,7 @@ namespace BreakoutOutlines.Drawer
         private bool _useShader;
 
         private CommandBuffer _cmd;
-        private Camera        _attachedCam;
+        private Camera _attachedCam;
         private const CameraEvent OutlineEvent = CameraEvent.AfterForwardAlpha;
         // Did EFT already request a depth texture before we touched the flag?
         // If not, forcing one costs a full-scene depth prepass, so it's only
@@ -250,13 +250,13 @@ namespace BreakoutOutlines.Drawer
         // Resampling can change the camera target without changing the draw list.
         // CommandBuffers record temporary RT dimensions and pixel-derived outline
         // width, so those values must be refreshed when the render size changes.
-        private int _recordedCameraWidth  = -1;
+        private int _recordedCameraWidth = -1;
         private int _recordedCameraHeight = -1;
-        private int _recordedScreenWidth  = -1;
+        private int _recordedScreenWidth = -1;
         private int _recordedScreenHeight = -1;
         private int _recordedTargetTextureId = -1;
-        private int _recordedTargetWidth    = -1;
-        private int _recordedTargetHeight   = -1;
+        private int _recordedTargetWidth = -1;
+        private int _recordedTargetHeight = -1;
 
         private const int RootExpansionRendererCap = 32;
 
@@ -1493,13 +1493,13 @@ namespace BreakoutOutlines.Drawer
             var cam = _mainCam;
             if (cam == _attachedCam) return;
             DetachCommandBuffer();
-            _recordedCameraWidth  = -1;
+            _recordedCameraWidth = -1;
             _recordedCameraHeight = -1;
-            _recordedScreenWidth  = -1;
+            _recordedScreenWidth = -1;
             _recordedScreenHeight = -1;
             _recordedTargetTextureId = -1;
-            _recordedTargetWidth    = -1;
-            _recordedTargetHeight   = -1;
+            _recordedTargetWidth = -1;
+            _recordedTargetHeight = -1;
             if (cam != null)
             {
                 cam.AddCommandBuffer(OutlineEvent, _cmd);
@@ -1529,14 +1529,14 @@ namespace BreakoutOutlines.Drawer
 
         private void RecordRenderDimensions(Camera cam)
         {
-            _recordedCameraWidth  = cam.pixelWidth;
+            _recordedCameraWidth = cam.pixelWidth;
             _recordedCameraHeight = cam.pixelHeight;
-            _recordedScreenWidth  = Screen.width;
+            _recordedScreenWidth = Screen.width;
             _recordedScreenHeight = Screen.height;
             var target = cam.targetTexture;
             _recordedTargetTextureId = target != null ? target.GetInstanceID() : 0;
-            _recordedTargetWidth    = target != null ? target.width : 0;
-            _recordedTargetHeight   = target != null ? target.height : 0;
+            _recordedTargetWidth = target != null ? target.width : 0;
+            _recordedTargetHeight = target != null ? target.height : 0;
         }
 
         // Enable the depth prepass only when occlusion needs it. When LOS is off we
@@ -1583,13 +1583,13 @@ namespace BreakoutOutlines.Drawer
             try { _attachedCam.RemoveCommandBuffer(OutlineEvent, _cmd); }
             catch { }
             _attachedCam = null;
-            _recordedCameraWidth  = -1;
+            _recordedCameraWidth = -1;
             _recordedCameraHeight = -1;
-            _recordedScreenWidth  = -1;
+            _recordedScreenWidth = -1;
             _recordedScreenHeight = -1;
             _recordedTargetTextureId = -1;
-            _recordedTargetWidth    = -1;
-            _recordedTargetHeight   = -1;
+            _recordedTargetWidth = -1;
+            _recordedTargetHeight = -1;
         }
 
         private void OnDestroy()

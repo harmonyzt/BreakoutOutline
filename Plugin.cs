@@ -52,7 +52,7 @@ namespace BreakoutOutlines
                 "Keyboard shortcut for toggling all loot outlines");
             OutlineLooseItems = Config.Bind("General", "Outline Loose Items", true, "Highlight loose loot items lying on the ground");
             OutlineContainers = Config.Bind("General", "Outline Containers", true, "Highlight lootable containers (crates, bags, etc.)");
-            OutlineEmptyContainers = Config.Bind("General", "Outline Containers", false, "Should we outline empty containers too?");
+            OutlineEmptyContainers = Config.Bind("General", "Outline Empty Containers", false, "Should we outline empty containers too?");
             DrawDeadBodies = Config.Bind("General", "Draw Dead Bodies", true, "Highlight dead bodies");
             HideSearchedContainers = Config.Bind("General", "Hide Searched Containers", false, "Stop outlining containers after they have been searched");
             ItemOutlineColor = Config.Bind("Visuals", "Item Color", new Color(1f, 1f, 1f, 1f), "Outline color for loose items");

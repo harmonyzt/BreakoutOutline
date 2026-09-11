@@ -1,10 +1,84 @@
-using System.Collections;
 using UnityEngine;
+using System.Collections;
 
 namespace BreakoutOutlines.Drawer
 {
     public partial class LootOutlineController
     {
+        // Cached per-frame values to avoid repeated calculations
+        private Vector3 _cachedCamPos;
+        private Vector3 _cachedCamFwd;
+        private Color _cachedItemColor;
+        private Color _cachedContColor;
+        private float _cachedBodyBias;
+        private float _cachedOccl;
+        private bool _frameDataCached;
+
+        // Reusable pools to reduce GC pressure
+        private static readonly System.Collections.Generic.Stack<System.Collections.Generic.List<MeshEntry>> _entryListPool
+            = new System.Collections.Generic.Stack<System.Collections.Generic.List<MeshEntry>>();
+
+        private void CacheFrameRenderData(Camera cam, bool losOn)
+        {
+            if (_frameDataCached) return;
+
+            _cachedCamPos = cam.transform.position;
+            _cachedCamFwd = cam.transform.forward;
+            _cachedItemColor = GetOutlineColor(false);
+            _cachedContColor = GetOutlineColor(true);
+            _cachedBodyBias = Plugin.BodyDepthBias.Value;
+            _cachedOccl = losOn ? 1f : 0f;
+            _frameDataCached = true;
+        }
+
+        private void InvalidateFrameCache()
+        {
+            _frameDataCached = false;
+        }
+
+        // private static System.Collections.Generic.List<MeshEntry> RentEntryList()
+        // {
+        //     return _entryListPool.Count > 0
+        //         ? _entryListPool.Pop()
+        //         : new System.Collections.Generic.List<MeshEntry>();
+        // }
+        //
+        // private static void ReturnEntryList(System.Collections.Generic.List<MeshEntry> list)
+        // {
+        //     if (list == null) return;
+        //     list.Clear();
+        //     if (_entryListPool.Count < 8)
+        //         _entryListPool.Push(list);
+        // }
+
+        // Batch SMR check
+        private static bool HasSkinnedMeshRenderers(MeshEntry[] entries)
+        {
+            for (int i = 0; i < entries.Length; i++)
+            {
+                if (entries[i].Smr != null)
+                    return true;
+            }
+            return false;
+        }
+
+        // Precompute matrices once per object
+        private void PrecomputeMatrices(MeshEntry[] entries, Matrix4x4[] buffer)
+        {
+            int n = entries.Length;
+            if (buffer.Length < n)
+                return;
+
+            for (int i = 0; i < n; i++)
+            {
+                var e = entries[i];
+                if (e.Smr != null) continue;
+                buffer[i] = e.Tx != null
+                    ? e.Tx.localToWorldMatrix * e.LocalOffset
+                    : e.FixedMatrix;
+            }
+        }
+        
         // Async cache builder
         private IEnumerator CacheBuilderLoop()
         {

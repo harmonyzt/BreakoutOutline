@@ -9,7 +9,7 @@ using LootOutlineController = BreakoutOutlines.Drawer.LootOutlineController;
 
 namespace BreakoutOutlines
 {
-    [BepInPlugin("com.harmonyzt.breakoutoutlines", "Breakout Outlines", "1.1.0")]
+    [BepInPlugin("com.harmonyzt.breakoutoutlines", "Breakout Outlines", "1.1.1")]
     public class Plugin : BaseUnityPlugin
     {
         public static ManualLogSource LogSource;
@@ -21,6 +21,7 @@ namespace BreakoutOutlines
         public static ConfigEntry<bool> OutlineContainers;
         public static ConfigEntry<bool> OutlineEmptyContainers;
         public static ConfigEntry<bool> DrawDeadBodies;
+        public static ConfigEntry<bool> DrawDeadBodiesFullBody;
         public static ConfigEntry<bool> HideSearchedContainers;
         public static ConfigEntry<Color> ItemOutlineColor;
         public static ConfigEntry<Color> ContainerOutlineColor;
@@ -46,33 +47,54 @@ namespace BreakoutOutlines
         {
             LogSource = Logger;
 
-            Enabled = Config.Bind("General", "Enabled", true, "Global outline toggle - switch all loot outlines on or off");
+            // General settings - ordered by importance
+            Enabled = Config.Bind("1. General", "Enabled", true, "Global outline toggle - switch all loot outlines on or off");
             GlobalOutlineToggle = Enabled;
-            ToggleOutlineKey = Config.Bind("General", "Toggle Outline Key", new KeyboardShortcut(KeyCode.F6),
+
+            ToggleOutlineKey = Config.Bind("1. General", "Toggle Outline Key", new KeyboardShortcut(KeyCode.F6),
                 "Keyboard shortcut for toggling all loot outlines");
-            OutlineLooseItems = Config.Bind("General", "Outline Loose Items", true, "Highlight loose loot items lying on the ground");
-            OutlineContainers = Config.Bind("General", "Outline Containers", true, "Highlight lootable containers (crates, bags, etc.)");
-            OutlineEmptyContainers = Config.Bind("General", "Outline Empty Containers", false, "Should we outline empty containers too?");
-            DrawDeadBodies = Config.Bind("General", "Draw Dead Bodies", true, "Highlight dead bodies");
-            HideSearchedContainers = Config.Bind("General", "Hide Searched Containers", false, "Stop outlining containers after they have been searched");
-            ItemOutlineColor = Config.Bind("Visuals", "Item Color", new Color(1f, 1f, 1f, 1f), "Outline color for loose items");
-            ContainerOutlineColor = Config.Bind("Visuals", "Container Color", new Color(1f, 1f, 1f, 1f), "Outline color for containers");
-            LimitNightVisionOpacity = Config.Bind("Performance", "Limit Opacity With Night Vision", true,
-                "Cap loose loot and container outline alpha at half while night vision is active to prevent bleeding/excessive bloom of outlines");
-            OutlineWidth = Config.Bind("Visuals", "Outline Width", 3f,
-                new ConfigDescription("Outline thickness in pixels (distance-independent)",
-                    new AcceptableValueRange<float>(1f, 20f)));
-            DetectionRange = Config.Bind("General", "Draw Range", 5.5f,
+
+            DetectionRange = Config.Bind("1. General", "Outline Range", 5.5f,
                 new ConfigDescription("Max distance from player to show outlines (meters)",
                     new AcceptableValueRange<float>(1f, 25f)));
-            LineOfSightCheck = Config.Bind("Performance", "Line of Sight Check", true, "Enable to hide outlines for items, containers and bodies so outlines don't bleed through floors and walls. Turn OFF to see every outline through everything");
-            BodyDepthBias = Config.Bind("Visuals", "Body Outline Depth Bias", 0.5f,
-                new ConfigDescription("Occlusion tolerance for dead-body outlines at contact surfaces (meters). Raise it if prone bodies still fragment - set lower it if body outlines bleed through thin walls. Loose items and containers use a fixed tight bias",
+
+            OutlineLooseItems = Config.Bind("1. General", "Outline Loose Items", true, "Highlight loose loot items lying on the ground");
+
+            OutlineContainers = Config.Bind("1. General", "Outline Containers", true, "Highlight lootable containers (crates, bags, etc.)");
+
+            OutlineEmptyContainers = Config.Bind("1. General", "Outline Empty Containers", false, "Should we outline empty containers too?");
+
+            HideSearchedContainers = Config.Bind("1. General", "Hide Searched Containers", false, "Stop outlining containers after they have been searched");
+
+            DrawDeadBodies = Config.Bind("1. General", "Draw Dead Bodies", true, "Highlight dead bodies");
+
+            DrawDeadBodiesFullBody = Config.Bind("1. General", "Draw Dead Bodies Full", false, "When enabled, outline dead bodies including their equipment. When disabled, only outline the body itself without worn gear");
+
+            // Visuals
+            ItemOutlineColor = Config.Bind("2. Visuals", "Item Color", new Color(1f, 1f, 1f, 0.8f), "Outline color for loose items");
+
+            ContainerOutlineColor = Config.Bind("2. Visuals", "Container Color", new Color(1f, 1f, 1f, 0.8f), "Outline color for containers");
+
+            OutlineWidth = Config.Bind("2. Visuals", "Outline Thickness", 3f,
+                new ConfigDescription("Outline thickness in pixels (distance-independent)",
+                    new AcceptableValueRange<float>(1f, 20f)));
+
+            BodyDepthBias = Config.Bind("2. Visuals", "Body Outline Depth Bias", 0.5f,
+                new ConfigDescription("Occlusion tolerance for dead-body outlines at contact surfaces (meters). Raise it if prone bodies still fragment - lower it if body outlines bleed through thin walls. Loose items and containers use a fixed tight bias",
                     new AcceptableValueRange<float>(0f, 2f)));
-            MaxOutlinedObjects = Config.Bind("Performance", "Max Outlined Objects", 25,
-                new ConfigDescription("Determines how many objects will be outlined at once - the nearest N (items, containers and bodies combined). 0 = unlimited. Set to ~20-30 if FPS dips in dense areas",
+
+            // Performance
+            LimitNightVisionOpacity = Config.Bind("3. Performance", "Limit Opacity With Night Vision", true,
+                "Cap loose loot and container outline alpha at half while night vision is active to prevent bleeding/excessive bloom of outlines");
+
+            LineOfSightCheck = Config.Bind("3. Performance", "Line of Sight Check", true, "Enable to hide outlines for items, containers and bodies so outlines don't bleed through floors and walls. Turn OFF to see every outline through everything");
+
+            MaxOutlinedObjects = Config.Bind("3. Performance", "Max Outlined Objects", 25,
+                new ConfigDescription("Determines how many objects will be outlined at once - the nearest N (items, containers and bodies combined). 0 = unlimited.",
                     new AcceptableValueRange<int>(0, 200)));
-            DebugLogging = Config.Bind("Debug", "Debug Logging", false, "Leave off for normal play.");
+
+            // Debug
+            DebugLogging = Config.Bind("4. Debug", "Debug Logging", false, "Leave off for normal play. Never turn on unless you have to, this might cause performance issues.");
 
             TryLoadShaderBundle();
 

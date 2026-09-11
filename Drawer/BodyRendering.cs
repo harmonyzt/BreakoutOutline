@@ -31,7 +31,7 @@ namespace BreakoutOutlines.Drawer
                 GatherTarget(p.gameObject, _passPlayerPos, _passRange,
                              expandToPrefabRoot: false,
                              isContainer: true,
-                             bodyOnly: true,
+                             bodyOnly: !Plugin.DrawDeadBodiesFullBody.Value,
                              worldPosOverride: bodyPos);
             }
 

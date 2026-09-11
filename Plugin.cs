@@ -51,10 +51,10 @@ namespace BreakoutOutlines
             Enabled = Config.Bind("1. General", "Enabled", true, "Global outline toggle - switch all loot outlines on or off");
             GlobalOutlineToggle = Enabled;
 
-            ToggleOutlineKey = Config.Bind("1. General", "Toggle Outline Key", new KeyboardShortcut(KeyCode.F6),
+            ToggleOutlineKey = Config.Bind("1. General", "Toggle Outline Key", new KeyboardShortcut(KeyCode.F7),
                 "Keyboard shortcut for toggling all loot outlines");
 
-            DetectionRange = Config.Bind("1. General", "Outline Range", 5.5f,
+            DetectionRange = Config.Bind("1. General", "Outline Range", 10f,
                 new ConfigDescription("Max distance from player to show outlines (meters)",
                     new AcceptableValueRange<float>(1f, 25f)));
 
@@ -64,11 +64,11 @@ namespace BreakoutOutlines
 
             OutlineEmptyContainers = Config.Bind("1. General", "Outline Empty Containers", false, "Should we outline empty containers too?");
 
-            HideSearchedContainers = Config.Bind("1. General", "Hide Searched Containers", false, "Stop outlining containers after they have been searched");
+            HideSearchedContainers = Config.Bind("1. General", "Hide Searched Containers", true, "Stop outlining containers after they have been searched");
 
             DrawDeadBodies = Config.Bind("1. General", "Draw Dead Bodies", true, "Highlight dead bodies");
 
-            DrawDeadBodiesFullBody = Config.Bind("1. General", "Draw Dead Bodies Full", false, "When enabled, outline dead bodies including their equipment. When disabled, only outline the body itself without worn gear");
+            DrawDeadBodiesFullBody = Config.Bind("1. General", "Draw Dead Bodies Fully", true, "When enabled, outline dead bodies including their equipment. When disabled, only outline the body itself without worn gear");
 
             // Visuals
             ItemOutlineColor = Config.Bind("2. Visuals", "Item Color", new Color(1f, 1f, 1f, 0.8f), "Outline color for loose items");

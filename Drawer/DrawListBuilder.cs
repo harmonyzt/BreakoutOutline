@@ -38,6 +38,8 @@ namespace BreakoutOutlines.Drawer
 
         private void BeginPass(GameWorld gameWorld)
         {
+            float passStart = Time.realtimeSinceStartup;
+            
             _lastPassStartTime = Time.realtimeSinceStartup;
             _cacheBuiltSincePass = false;
 
@@ -158,6 +160,9 @@ namespace BreakoutOutlines.Drawer
             _diagInRange = _diagOwned = _diagQueued = 0;
             _buildCursor = 0;
             _buildPhase = BuildPhase.Items;
+            
+            // Log
+            LogDrawPerformance("begin-pass", passStart);
         }
 
         private void StepItemsPhase()

@@ -1,5 +1,4 @@
 using System;
-using Comfort.Common;
 using EFT;
 using EFT.Interactive;
 using EFT.InventoryLogic;
@@ -13,7 +12,7 @@ namespace BreakoutOutlines.Drawer
         {
             try
             {
-                var player = Singleton<GameWorld>.Instance?.MainPlayer;
+                var player = _gameWorld != null ? _gameWorld.MainPlayer : null;
 
                 if (player == null)
                     return;
@@ -55,7 +54,7 @@ namespace BreakoutOutlines.Drawer
                     $"type={item.GetType().FullName}, " +
                     $"id={item.Id}");
 
-                var gameWorld = Singleton<GameWorld>.Instance;
+                var gameWorld = _gameWorld;
 
                 if (gameWorld == null)
                     return;

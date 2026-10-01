@@ -1,6 +1,6 @@
-using Comfort.Common;
 using EFT;
 using EFT.Interactive;
+using System.Diagnostics;
 using UnityEngine;
 
 namespace BreakoutOutlines.Drawer
@@ -13,12 +13,7 @@ namespace BreakoutOutlines.Drawer
 
         private void StepDrawListBuilder()
         {
-            var gameWorld = Singleton<GameWorld>.Instance;
-            if (gameWorld?.MainPlayer == null)
-            {
-                ResetWorldState();
-                return;
-            }
+            var gameWorld = _gameWorld;
 
             switch (_buildPhase)
             {
@@ -112,30 +107,24 @@ namespace BreakoutOutlines.Drawer
             _seenSnapshot.Clear();
             _seenSnapshot.AddRange(_seenPlayers);
 
-            // Snapshot the live world-loot registry
+            // Keep a reference to the authoritative live registry; process it in bounded slices below.
             _passDiag = false;
+            _lootScanCpuTicks = 0;
+            _lootScanMaxSliceTicks = 0;
             if (Plugin.OutlineLooseItems.Value)
             {
-                _lootItemsSnapshot.Clear();
+                _lootItemsSource = null;
+                _lootItemsScanLimit = 0;
                 var lootRegistry = gameWorld.LootItems;
                 var registryList = lootRegistry != null ? lootRegistry._iteration : null;
                 if (registryList != null && registryList.Count > 0)
                 {
-                    _lootItemsSnapshot.AddRange(registryList);
-                }
-                else
-                {
-                    float nowR = Time.realtimeSinceStartup;
-                    if (nowR - _lootItemCacheBuildTime >= LootItemCacheRefreshSeconds)
-                    {
-                        _lootItemCache = FindObjectsOfType<LootItem>();
-                        _lootItemCacheBuildTime = nowR;
-                    }
-                    _lootItemsSnapshot.AddRange(_lootItemCache);
+                    _lootItemsSource = registryList;
+                    _lootItemsScanLimit = registryList.Count;
                 }
 
                 if (Plugin.DebugLogging.Value &&
-                    Time.realtimeSinceStartup - _lastLootDiagTime >= LootItemCacheRefreshSeconds)
+                    Time.realtimeSinceStartup - _lastLootDiagTime >= 10f)
                 {
                     _passDiag = true;
                     _lastLootDiagTime = Time.realtimeSinceStartup;
@@ -145,15 +134,9 @@ namespace BreakoutOutlines.Drawer
             // Container cache
             if (Plugin.OutlineContainers.Value)
             {
-                float nowC = Time.realtimeSinceStartup;
-                float cadence = _containerCache.Length == 0
-                    ? ContainerCacheRetrySeconds
-                    : ContainerRescanSeconds;
-                if (nowC - _containerCacheTryTime >= cadence)
+                if (_containerCache.Length == 0)
                 {
-                    var scan = FindObjectsOfType<LootableContainer>();
-                    if (scan.Length > _containerCache.Length) _containerCache = scan;
-                    _containerCacheTryTime = nowC;
+                    _containerCache = FindObjectsOfType<LootableContainer>();
                 }
             }
 
@@ -167,34 +150,39 @@ namespace BreakoutOutlines.Drawer
 
         private void StepItemsPhase()
         {
-            if (!Plugin.OutlineLooseItems.Value || _lootItemsSnapshot.Count == 0)
+            if (!Plugin.OutlineLooseItems.Value || _lootItemsSource == null || _lootItemsScanLimit == 0)
             {
                 _buildCursor = 0;
                 _buildPhase = BuildPhase.Containers;
                 return;
             }
 
-            int end = Mathf.Min(_buildCursor + ItemsPerFrame, _lootItemsSnapshot.Count);
-            for (int i = _buildCursor; i < end; i++)
+            int availableCount = Mathf.Min(_lootItemsScanLimit, _lootItemsSource.Count);
+            if (_buildCursor >= availableCount)
             {
-                var li = _lootItemsSnapshot[i];
+                _buildCursor = 0;
+                _buildPhase = BuildPhase.Containers;
+                return;
+            }
+
+            int end = Mathf.Min(_buildCursor + ItemsPerFrame, availableCount);
+            int startCursor = _buildCursor;
+            int i = startCursor;
+            long sliceStartTicks = Stopwatch.GetTimestamp();
+            long budgetTicks = Stopwatch.Frequency * LooseItemScanBudgetMilliseconds / 1000L;
+            for (; i < end; i++)
+            {
+                if (i > startCursor && Stopwatch.GetTimestamp() - sliceStartTicks >= budgetTicks)
+                    break;
+
+                var li = _lootItemsSource[i];
                 if (li == null || li.gameObject == null) continue;
 
-                if (!li.gameObject.activeInHierarchy)
-                {
-                    _activeThisTick.Add(li.gameObject.GetInstanceID());
-                    continue;
-                }
-
-                var renderers = li.gameObject.GetComponentsInChildren<Renderer>(false);
-                if (renderers.Length == 0)
-                {
-                    _activeThisTick.Add(li.gameObject.GetInstanceID());
-                    continue;
-                }
+                int instanceId = li.gameObject.GetInstanceID();
+                _activeThisTick.Add(instanceId);
+                if (!li.gameObject.activeInHierarchy) continue;
 
                 float dSqr = (li.transform.position - _passPlayerPos).sqrMagnitude;
-
                 if (dSqr > _passPrefilterSqr) continue;
 
                 _diagInRange++;
@@ -214,13 +202,23 @@ namespace BreakoutOutlines.Drawer
                              isContainer: false);
             }
 
-            _buildCursor = end;
-            if (_buildCursor >= _lootItemsSnapshot.Count)
+            long sliceTicks = Stopwatch.GetTimestamp() - sliceStartTicks;
+            if (_passDiag)
+            {
+                _lootScanCpuTicks += sliceTicks;
+                if (sliceTicks > _lootScanMaxSliceTicks)
+                    _lootScanMaxSliceTicks = sliceTicks;
+            }
+
+            _buildCursor = i;
+            if (_buildCursor >= _lootItemsScanLimit || _buildCursor >= _lootItemsSource.Count)
             {
                 if (_passDiag)
                     Plugin.LogSource?.LogInfo(
-                        $"[BreakoutOutline] loose-item scan: LootItem={_lootItemsSnapshot.Count}, " +
-                        $"inRange={_diagInRange}, ownedRejected={_diagOwned}, queued={_diagQueued}");
+                        $"[BreakoutOutline] loose-item scan: LootItem={_lootItemsScanLimit}, " +
+                        $"inRange={_diagInRange}, ownedRejected={_diagOwned}, queued={_diagQueued}, " +
+                        $"scanCpuMs={_lootScanCpuTicks * 1000.0 / Stopwatch.Frequency:F2}, " +
+                        $"maxSliceMs={_lootScanMaxSliceTicks * 1000.0 / Stopwatch.Frequency:F2}");
                 _buildCursor = 0;
                 _buildPhase = BuildPhase.Containers;
             }
@@ -240,6 +238,7 @@ namespace BreakoutOutlines.Drawer
             {
                 var c = _containerCache[i];
                 if (c == null || c.gameObject == null) continue;
+                _activeThisTick.Add(c.gameObject.GetInstanceID());
                 if ((c.transform.position - _passPlayerPos).sqrMagnitude > _passPrefilterSqr) continue;
                 if (!ContainerHasLoot(c) && !Plugin.OutlineEmptyContainers.Value) continue;
                 if (Plugin.HideSearchedContainers.Value && ContainerHasBeenSearched(c)) continue;
@@ -303,6 +302,12 @@ namespace BreakoutOutlines.Drawer
             DetachCommandBuffer();
             _mainCam = null;
             _limitOpacityForNightVision = false;
+            if (_searchController != null)
+            {
+                _searchController.OnItemSearched -= OnItemSearched;
+                _searchController = null;
+            }
+            _searchedContainers.Clear();
             foreach (var kv in _rendererCache) ReleaseCorpseSmrs(kv.Value);
             _drawObjects.Clear();
             _drawObjectsScratch.Clear();
@@ -316,11 +321,9 @@ namespace BreakoutOutlines.Drawer
             _seenSnapshot.Clear();
             _deadBodyPositions.Clear();
             _containerCache = System.Array.Empty<LootableContainer>();
-            _containerCacheTryTime = -999f;
             _containerLootCache.Clear();
-            _lootItemCache = System.Array.Empty<LootItem>();
-            _lootItemCacheBuildTime = -999f;
-            _lootItemsSnapshot.Clear();
+            _lootItemsSource = null;
+            _lootItemsScanLimit = 0;
             _mainEquipIds = System.Array.Empty<string>();
             _mainEquipBuiltAt = -999f;
             _buildPhase = BuildPhase.Idle;

@@ -15,7 +15,8 @@ namespace BreakoutOutlines.Drawer
             _activeThisTick.Add(id);
 
             Vector3 worldPos = worldPosOverride ?? go.transform.position;
-            if (Vector3.Distance(playerPos, worldPos) > range) return;
+            float distanceSqr = (playerPos - worldPos).sqrMagnitude;
+            if (distanceSqr > range * range) return;
             if (!_rendererCache.TryGetValue(id, out var cached))
             {
                 bool blocked = _failRetryAt.TryGetValue(id, out float retryAt)
@@ -34,17 +35,67 @@ namespace BreakoutOutlines.Drawer
                 return;
             }
 
+            MeshEntry[] drawEntries = cached.Entries;
+            Bounds drawBounds = cached.Bounds;
+            if (expandToPrefabRoot)
+            {
+                _expandedRendererScratch.Clear();
+                Bounds nearbyBounds = default;
+                bool hasNearbyBounds = false;
+                bool excludedParentRenderer = false;
+                float rangeSqr = range * range;
+                Transform targetTransform = go.transform;
+
+                for (int i = 0; i < cached.Entries.Length; i++)
+                {
+                    var entry = cached.Entries[i];
+                    Renderer renderer = entry.Rend != null ? entry.Rend : entry.Smr;
+                    if (renderer == null)
+                    {
+                        excludedParentRenderer = true;
+                        continue;
+                    }
+
+                    Transform rendererTransform = renderer.transform;
+                    bool belongsToTarget = rendererTransform == targetTransform
+                                           || rendererTransform.IsChildOf(targetTransform);
+                    if (!belongsToTarget &&
+                        (renderer.bounds.ClosestPoint(playerPos) - playerPos).sqrMagnitude > rangeSqr)
+                    {
+                        excludedParentRenderer = true;
+                        continue;
+                    }
+
+                    _expandedRendererScratch.Add(entry);
+                    if (hasNearbyBounds) nearbyBounds.Encapsulate(renderer.bounds);
+                    else
+                    {
+                        nearbyBounds = renderer.bounds;
+                        hasNearbyBounds = true;
+                    }
+                }
+
+                if (excludedParentRenderer)
+                {
+                    if (_expandedRendererScratch.Count == 0)
+                        return;
+                    drawEntries = _expandedRendererScratch.ToArray();
+                    drawBounds = nearbyBounds;
+                }
+            }
+
             if (!isContainer)
             {
-                Vector3 s = cached.Bounds.size;
+                Vector3 s = drawBounds.size;
                 float largest = Mathf.Max(s.x, Mathf.Max(s.y, s.z));
 
                 if (largest < MinItemSize) return;
             }
 
-            float fade = Mathf.Clamp01(1f - Vector3.Distance(playerPos, worldPos) / Mathf.Max(range, 0.001f));
+            float distance = Mathf.Sqrt(distanceSqr);
+            float fade = Mathf.Clamp01(1f - distance / Mathf.Max(range, 0.001f));
 
-            _drawObjectsScratch.Add(new DrawObject(id, cached.Entries, isContainer, cached.Bounds, fade, bodyOnly));
+            _drawObjectsScratch.Add(new DrawObject(id, drawEntries, isContainer, drawBounds, fade, bodyOnly));
         }
 
         private static RendererData CollectRenderers(GameObject go, bool expandToPrefabRoot, bool bodyOnly = false)
@@ -108,6 +159,7 @@ namespace BreakoutOutlines.Drawer
                     var expanded = p.GetComponentsInChildren<Renderer>(false);
                     if (expanded.Length <= selected.Length) break;
                     if (expanded.Length > RootExpansionRendererCap) break;
+
                     selected = expanded;
                     p = p.parent;
                 }

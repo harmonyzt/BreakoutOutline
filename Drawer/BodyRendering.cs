@@ -1,4 +1,3 @@
-using Comfort.Common;
 using EFT;
 using UnityEngine;
 
@@ -15,7 +14,7 @@ namespace BreakoutOutlines.Drawer
                 return;
             }
 
-            var mainPlayer = Singleton<GameWorld>.Instance?.MainPlayer;
+            var mainPlayer = _gameWorld != null ? _gameWorld.MainPlayer : null;
             int end = Mathf.Min(_buildCursor + BodiesPerFrame, _seenSnapshot.Count);
             for (int i = _buildCursor; i < end; i++)
             {

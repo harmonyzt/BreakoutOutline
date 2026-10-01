@@ -2,10 +2,9 @@
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
-using Comfort.Common;
 using EFT;
+using HarmonyLib;
 using UnityEngine;
-using LootOutlineController = BreakoutOutlines.Drawer.LootOutlineController;
 
 namespace BreakoutOutlines
 {
@@ -41,7 +40,7 @@ namespace BreakoutOutlines
         public static Shader MaskShader;
         public static Shader EdgeShader;
 
-        private bool _controllerReady;
+        private Harmony _harmony;
 
         private void Awake()
         {
@@ -97,6 +96,9 @@ namespace BreakoutOutlines
             DebugLogging = Config.Bind("4. Debug", "Debug Logging", false, "Leave off for normal play. Never turn on unless you have to, this might cause performance issues.");
 
             TryLoadShaderBundle();
+
+            _harmony = new Harmony("com.harmonyzt.breakoutoutlines.lifecycle");
+            _harmony.PatchAll(typeof(Plugin).Assembly);
 
             bool anyPipeline = (MaskShader != null && EdgeShader != null)
                             || (StencilShader != null && DrawShader != null && ClearShader != null)
@@ -178,28 +180,11 @@ namespace BreakoutOutlines
         {
             if (ToggleOutlineKey.Value.IsDown())
                 GlobalOutlineToggle.Value = !GlobalOutlineToggle.Value;
+        }
 
-            if (!GlobalOutlineToggle.Value)
-            {
-                return;
-            }
-
-            var gameWorld = Singleton<GameWorld>.Instance;
-            if (gameWorld == null)
-            {
-                _controllerReady = false;
-                return;
-            }
-
-            if (!_controllerReady)
-            {
-                if (gameWorld.GetComponent<LootOutlineController>() == null)
-                {
-                    gameWorld.gameObject.AddComponent<LootOutlineController>();
-                }
-
-                _controllerReady = true;
-            }
+        private void OnDestroy()
+        {
+            _harmony?.UnpatchSelf();
         }
     }
 }

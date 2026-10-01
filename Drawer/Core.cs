@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using Comfort.Common;
 using EFT;
 using EFT.Interactive;
 using UnityEngine;
@@ -41,23 +40,19 @@ namespace BreakoutOutlines.Drawer
         // ----
         
         private LootableContainer[] _containerCache = Array.Empty<LootableContainer>();
+        private GameWorld _gameWorld;
 
-        // Per-pass snapshot of GameWorld.LootItems.List_0
-        private readonly List<LootItem> _lootItemsSnapshot = new List<LootItem>();
-        private LootItem[] _lootItemCache = Array.Empty<LootItem>();
-        private float _lootItemCacheBuildTime = -999f;
-        private const float LootItemCacheRefreshSeconds = 10f;
+        // Live loot registry source scanned in bounded index batches, without a full per-pass copy.
+        private IList<LootItem> _lootItemsSource;
+        private int _lootItemsScanLimit;
         private float _lastLootDiagTime = -999f;
+        private long _lootScanCpuTicks;
+        private long _lootScanMaxSliceTicks;
 
         // Local-player equipped-ID cache
         private string[] _mainEquipIds = Array.Empty<string>();
         private float _mainEquipBuiltAt = -999f;
         private const float MainEquipRefreshSeconds = 2f;
-
-        // Container cache
-        private float _containerCacheTryTime = -999f;
-        private const float ContainerCacheRetrySeconds = 5f;
-        private const float ContainerRescanSeconds = 60f;
 
         // Per-container has-loot
         private struct ContainerLoot { public bool Has; public float At; }
@@ -119,7 +114,10 @@ namespace BreakoutOutlines.Drawer
         private readonly Dictionary<int, CorpseEquip> _corpseEquipCache = new Dictionary<int, CorpseEquip>();
         private const float CorpseEquipRefreshSeconds = 5f;
         private readonly List<string> _equipScratch = new List<string>();
+        private readonly List<MeshEntry> _expandedRendererScratch = new List<MeshEntry>();
         private Coroutine _cacheCoroutine;
+        private bool _raidActive;
+        private bool _worldDisposing;
         private const float CacheBudgetSeconds = 0.003f;
 
         // ----
@@ -166,6 +164,7 @@ namespace BreakoutOutlines.Drawer
 
         // Per-frame slice sizes (amortized processing budgets)
         private const int ItemsPerFrame = 192;
+        private const int LooseItemScanBudgetMilliseconds = 1;
         private const int ContainersPerFrame = 48;
         private const int BodiesPerFrame = 24;
 
@@ -229,8 +228,7 @@ namespace BreakoutOutlines.Drawer
         
         private void Awake()
         {
-            _cacheCoroutine = StartCoroutine(CacheBuilderLoop());
-
+            _gameWorld = GetComponent<GameWorld>();
             _drawSortCmp = (a, b) =>
                 (a.Bounds.center - _drawSortOrigin).sqrMagnitude
                 .CompareTo((b.Bounds.center - _drawSortOrigin).sqrMagnitude);
@@ -240,17 +238,33 @@ namespace BreakoutOutlines.Drawer
 
         private void Update()
         {
-            if (!Plugin.GlobalOutlineToggle.Value)
+            if (_worldDisposing)
+                return;
+
+            var gameWorld = _gameWorld;
+            if (!Plugin.GlobalOutlineToggle.Value || gameWorld.MainPlayer == null)
             {
-                DetachCommandBuffer();
-                _cmd?.Clear();
+                StopCacheBuilder();
+                if (_raidActive)
+                {
+                    ResetWorldState();
+                    _raidActive = false;
+                }
+                else
+                {
+                    DetachCommandBuffer();
+                    _cmd?.Clear();
+                }
                 return;
             }
 
+            _raidActive = true;
+            if (_cacheCoroutine == null)
+                _cacheCoroutine = StartCoroutine(CacheBuilderLoop());
+
             _mainCam = ResolveFpsCamera();
-            var gameWorld = Singleton<GameWorld>.Instance;
             _limitOpacityForNightVision = Plugin.LimitNightVisionOpacity.Value
-                && Plugin.IsNightVisionActive(gameWorld?.MainPlayer);
+                && Plugin.IsNightVisionActive(gameWorld.MainPlayer);
 
             EnsureCommandBufferAttached();
 
@@ -287,6 +301,28 @@ namespace BreakoutOutlines.Drawer
             TryHookSearchController();
         }
 
+        private void StopCacheBuilder()
+        {
+            if (_cacheCoroutine != null)
+            {
+                StopCoroutine(_cacheCoroutine);
+                _cacheCoroutine = null;
+            }
+            _cacheQueue.Clear();
+            _pendingCacheIds.Clear();
+        }
+
+        internal void OnGameWorldDisposing()
+        {
+            if (_worldDisposing)
+                return;
+
+            _worldDisposing = true;
+            StopCacheBuilder();
+            ResetWorldState();
+            _raidActive = false;
+        }
+
         private void OnDestroy()
         {
             _mainCam = null;
@@ -299,6 +335,11 @@ namespace BreakoutOutlines.Drawer
             if (_cmd != null) { _cmd.Release(); _cmd = null; }
 
             _drawObjects.Clear();
+            if (_searchController != null)
+            {
+                _searchController.OnItemSearched -= OnItemSearched;
+                _searchController = null;
+            }
             foreach (var kv in _rendererCache) ReleaseCorpseSmrs(kv.Value);
             _rendererCache.Clear();
             _activeThisTick.Clear();

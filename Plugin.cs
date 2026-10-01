@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace BreakoutOutlines
 {
-    [BepInPlugin("com.harmonyzt.breakoutoutlines", "Breakout Outlines", "1.1.1")]
+    [BepInPlugin("com.harmonyzt.breakoutoutlines", "Breakout Outlines", "1.2.0")]
     public class Plugin : BaseUnityPlugin
     {
         public static ManualLogSource LogSource;
@@ -65,9 +65,9 @@ namespace BreakoutOutlines
 
             HideSearchedContainers = Config.Bind("1. General", "Hide Searched Containers", true, "Stop outlining containers after they have been searched");
 
-            DrawDeadBodies = Config.Bind("1. General", "Draw Dead Bodies", true, "Highlight dead bodies");
+            DrawDeadBodies = Config.Bind("1. General", "Draw Dead Bodies", false, "Highlight dead bodies");
 
-            DrawDeadBodiesFullBody = Config.Bind("1. General", "Draw Dead Bodies Fully", true, "When enabled, outline dead bodies including their equipment. When disabled, only outline the body itself without worn gear");
+            DrawDeadBodiesFullBody = Config.Bind("1. General", "Draw Dead Bodies Fully", false, "When enabled, outline dead bodies including their equipment. When disabled, only outline the body itself without worn gear");
 
             // Visuals
             ItemOutlineColor = Config.Bind("2. Visuals", "Item Color", new Color(1f, 1f, 1f, 0.8f), "Outline color for loose items");

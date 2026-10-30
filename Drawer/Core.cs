@@ -234,6 +234,7 @@ namespace BreakoutOutlines.Drawer
                 .CompareTo((b.Bounds.center - _drawSortOrigin).sqrMagnitude);
 
             InitializeShaderPipeline();
+            Camera.onPreCull += OnCameraPreCull;
         }
 
         private void Update()
@@ -325,6 +326,7 @@ namespace BreakoutOutlines.Drawer
 
         private void OnDestroy()
         {
+            Camera.onPreCull -= OnCameraPreCull;
             _mainCam = null;
             if (_cacheCoroutine != null) { StopCoroutine(_cacheCoroutine); _cacheCoroutine = null; }
             _cacheQueue.Clear();

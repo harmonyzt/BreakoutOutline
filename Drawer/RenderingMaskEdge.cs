@@ -11,6 +11,7 @@ namespace BreakoutOutlines.Drawer
         {
             if (_cmd == null) return;
             _cmd.Clear();
+            _recordedSmrs.Clear();
 
             var cam = _attachedCam;
             if (cam == null) return;
@@ -109,6 +110,7 @@ namespace BreakoutOutlines.Drawer
                         if (smr == null || !smr.enabled || !smr.gameObject.activeInHierarchy) continue;
                         var mesh = smr.sharedMesh;
                         if (mesh == null) continue;
+                        _recordedSmrs.Add(new RecordedSmr(smr, mesh));
                         int subCount = mesh.subMeshCount;
                         for (int s = 0; s < subCount; s++)
                             _cmd.DrawRenderer(smr, _maskMat, s, 0);
@@ -175,6 +177,7 @@ namespace BreakoutOutlines.Drawer
                     var smr = d.Entries[i].Smr;
                     if (smr == null || !smr.enabled || !smr.gameObject.activeInHierarchy || smr.sharedMesh == null)
                         continue;
+                    _recordedSmrs.Add(new RecordedSmr(smr, smr.sharedMesh));
                     for (int s = 0; s < smr.sharedMesh.subMeshCount; s++)
                         _cmd.DrawRenderer(smr, _maskMat, s, 0);
                 }

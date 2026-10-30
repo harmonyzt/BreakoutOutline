@@ -9,6 +9,7 @@ namespace BreakoutOutlines.Drawer
         {
             if (_cmd == null) return;
             _cmd.Clear();
+            _recordedSmrs.Clear();
             ApplyDepthMode(_attachedCam, Plugin.LineOfSightCheck.Value);
             if (_drawObjects.Count == 0) return;
 
@@ -117,6 +118,7 @@ namespace BreakoutOutlines.Drawer
                         if (!smr.enabled || !smr.gameObject.activeInHierarchy) continue;
                         var mesh = smr.sharedMesh;
                         if (mesh == null) continue;
+                        _recordedSmrs.Add(new RecordedSmr(smr, mesh));
                         int subCount = mesh.subMeshCount;
                         for (int s = 0; s < subCount; s++) _cmd.DrawRenderer(smr, stencilMat, s);
                     }

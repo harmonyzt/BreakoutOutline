@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace BreakoutOutlines
 {
-    [BepInPlugin("com.harmonyzt.breakoutoutlines", "Breakout Outlines", "1.2.0")]
+    [BepInPlugin("com.harmonyzt.breakoutoutlines", "Breakout Outlines", "1.3.0")]
     public class Plugin : BaseUnityPlugin
     {
         public static ManualLogSource LogSource;

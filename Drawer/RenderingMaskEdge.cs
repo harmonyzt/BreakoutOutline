@@ -21,7 +21,7 @@ namespace BreakoutOutlines.Drawer
             if (_drawObjects.Count == 0) return;
 
             // Cache frequently accessed values for the frame
-            CacheFrameRenderData(cam, losOn);
+            CacheFrameRenderData(losOn);
             GeometryUtility.CalculateFrustumPlanes(cam, _frustumPlanes);
 
             // Cull objects outside frustum and behind camera
@@ -31,13 +31,15 @@ namespace BreakoutOutlines.Drawer
             {
                 var d = _drawObjects[oi];
 
-                // Back-face cull using cached camera forward
-                float fwdDist = Vector3.Dot(_cachedCamFwd, d.Bounds.center - _cachedCamPos);
-                if (fwdDist < 0f) continue;
+                if (!ComputeLiveBounds(d.Entries, out var liveBounds))
+                {
+                    liveBounds = d.Bounds;
+                }
 
-                // Frustum cull with live bounds
-                if (!ComputeLiveBounds(d.Entries, out var liveBounds)) liveBounds = d.Bounds;
-                if (!GeometryUtility.TestPlanesAABB(_frustumPlanes, liveBounds)) continue;
+                if (!GeometryUtility.TestPlanesAABB(_frustumPlanes, liveBounds))
+                {
+                    continue;
+                }
 
                 _visibleIdxScratch.Add(oi);
             }
@@ -54,8 +56,8 @@ namespace BreakoutOutlines.Drawer
             int h = cam.targetTexture != null
                 ? Mathf.Max(1, cam.targetTexture.height)
                 : Mathf.Max(1, cam.pixelHeight);
-            _cmd.GetTemporaryRT(_maskRtId, w, h, 0, FilterMode.Bilinear, RenderTextureFormat.ARGBHalf);
-            _cmd.GetTemporaryRT(_fadeRtId, w, h, 0, FilterMode.Bilinear, RenderTextureFormat.RHalf);
+            _cmd.GetTemporaryRT(_maskRtId, w, h, 0, FilterMode.Point, RenderTextureFormat.ARGBHalf);
+            _cmd.GetTemporaryRT(_fadeRtId, w, h, 0, FilterMode.Point, RenderTextureFormat.RGHalf);
             _cmd.SetRenderTarget(_maskRtId);
             _cmd.ClearRenderTarget(false, true, Color.clear);
 
@@ -65,7 +67,7 @@ namespace BreakoutOutlines.Drawer
             {
                 var d = _drawObjects[_visibleIdxScratch[vi]];
 
-                Color color = d.IsContainer ? _cachedContColor : _cachedItemColor;
+                Color color = HighlightColor(d, _cachedItemColor, _cachedContColor);
                 float bias = d.IsBody ? _cachedBodyBias : ItemDepthBias;
 
                 int n = d.Entries.Length;
@@ -81,7 +83,6 @@ namespace BreakoutOutlines.Drawer
                 _mpb.SetFloat(PROP_DepthOcclude, _cachedOccl);
                 _mpb.SetFloat(PROP_DepthBias, bias);
                 _mpb.SetFloat(PROP_MaskBodyFlag, d.IsBody ? 1f : 0f);
-                _mpb.SetFloat(PROP_OutlineFade, d.Fade);
                 _mpb.SetFloat(PROP_MaskFadeOnly, 0f);
 
                 for (int i = 0; i < n; i++)
@@ -100,7 +101,6 @@ namespace BreakoutOutlines.Drawer
                     _cmd.SetGlobalFloat(PROP_DepthOcclude, _cachedOccl);
                     _cmd.SetGlobalFloat(PROP_DepthBias, bias);
                     _cmd.SetGlobalFloat(PROP_MaskBodyFlag, d.IsBody ? 1f : 0f);
-                    _cmd.SetGlobalFloat(PROP_OutlineFade, d.Fade);
                     _cmd.SetGlobalFloat(PROP_MaskFadeOnly, 0f);
 
                     for (int i = 0; i < n; i++)
@@ -119,6 +119,8 @@ namespace BreakoutOutlines.Drawer
             // Render fade mask (per-object opacity)
             _cmd.SetRenderTarget(_fadeRtId);
             _cmd.ClearRenderTarget(false, true, Color.clear);
+            _maskMat.SetFloat("_InteriorTint", Plugin.InteriorTint.Value);
+            _maskMat.SetFloat("_InteriorShimmer", Plugin.InteriorShimmer.Value);
             RecordFadeMaskPass();
 
             // Single fullscreen edge detection pass
@@ -139,11 +141,14 @@ namespace BreakoutOutlines.Drawer
 
         private void RecordFadeMaskPass()
         {
+            float interiorScale = _limitOpacityForNightVision ? 0.5f : 1f;
+
             for (int vi = 0; vi < _visibleIdxScratch.Count; vi++)
             {
                 var d = _drawObjects[_visibleIdxScratch[vi]];
                 Color objectColor = d.IsContainer ? _cachedContColor : _cachedItemColor;
-                float opacity = objectColor.a * d.Fade;
+                var opacity = new Vector4(objectColor.a * d.Fade, interiorScale * d.Fade, 0f, 0f);
+                float bias = d.IsBody ? _cachedBodyBias : ItemDepthBias;
                 int n = d.Entries.Length;
 
                 // Precompute matrices for static meshes
@@ -153,8 +158,9 @@ namespace BreakoutOutlines.Drawer
 
                 // Batch static meshes
                 _mpb.Clear();
-                _mpb.SetFloat(PROP_OutlineFade, opacity);
+                _mpb.SetVector(PROP_HighlightOpacity, opacity);
                 _mpb.SetFloat(PROP_MaskFadeOnly, 1f);
+                _mpb.SetFloat(PROP_DepthBias, bias);
                 _mpb.SetFloat(PROP_DepthOcclude, _cachedOccl);
                 for (int i = 0; i < n; i++)
                 {
@@ -167,8 +173,9 @@ namespace BreakoutOutlines.Drawer
                 // Render skinned meshes if present
                 if (!HasSkinnedMeshRenderers(d.Entries)) continue;
 
-                _cmd.SetGlobalFloat(PROP_OutlineFade, opacity);
+                _cmd.SetGlobalVector(PROP_HighlightOpacity, opacity);
                 _cmd.SetGlobalFloat(PROP_MaskFadeOnly, 1f);
+                _cmd.SetGlobalFloat(PROP_DepthBias, bias);
                 _cmd.SetGlobalFloat(PROP_DepthOcclude, _cachedOccl);
                 for (int i = 0; i < n; i++)
                 {

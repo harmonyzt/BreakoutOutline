@@ -1,20 +1,4 @@
-// Tier-2 pipeline, pass 2 of 2 — one fullscreen pass that turns the silhouette
-// mask (OutlineMask) into outline rings and composites them over the camera
-// colour. This is the whole point of Tier-2: outlining is now ONE fullscreen
-// draw regardless of how many objects/submeshes are highlighted, instead of
-// three draws per submesh per object every frame.
-//
-// For each screen pixel:
-//   • If the mask is filled here (A > 0) it's INSIDE a silhouette → discard
-//     (we draw the border ring, not a solid fill).
-//   • Otherwise sample the mask in rings around the pixel. If any tap is filled,
-//     this pixel is within _OutlineWidthPx of a silhouette edge → it's a ring
-//     pixel. Take the nearest filled tap's colour (and its stored eye-depth).
-//   • Ring occlusion (_EdgeOcclude): clip the ring pixel if scene geometry at
-//     this location is nearer than the silhouette edge depth — keeps the ring
-//     from drawing over walls in front of the object.
-//
-// Width is in screen pixels (distance-independent), matching the config.
+// Composite the visible item fill and silhouette rings over the camera color.
 Shader "LootOutline/Edge"
 {
     Properties
@@ -76,8 +60,11 @@ Shader "LootOutline/Edge"
             float4 frag(v2f i) : SV_Target
             {
                 float4 c = tex2D(_MainTex, i.uv);
-                if (c.a != 0.0) discard;  // interior of a silhouette — not the border
-                                          // (depth is signed: negative = body)
+                if (c.a != 0.0)
+                {
+                    if (c.a < 0.0) discard;
+                    return float4(c.rgb, tex2D(_FadeTex, i.uv).g);
+                }
 
                 float2 texel = _MainTex_TexelSize.xy;
 

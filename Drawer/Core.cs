@@ -80,12 +80,25 @@ namespace BreakoutOutlines.Drawer
             { Mesh = null; Tx = null; LocalOffset = Matrix4x4.identity; FixedMatrix = Matrix4x4.identity; Layer = 0; Smr = s; Rend = null; }
         }
 
-        private readonly struct RendererData
+        private sealed class RendererData
         {
             public readonly MeshEntry[] Entries;
             public readonly Bounds Bounds;
             public readonly bool IsBody;
-            public RendererData(MeshEntry[] e, Bounds b, bool isBody = false) { Entries = e; Bounds = b; IsBody = isBody; }
+            public readonly bool ExpandedToParent;
+            public EFT.InventoryLogic.Item LooseItem;
+            public bool NativeQuestItem;
+            public bool Wishlisted;
+            public bool QuestNeeded;
+            public float NextQuestCheck;
+
+            public RendererData(MeshEntry[] entries, Bounds bounds, bool isBody = false, bool expandedToParent = false)
+            {
+                Entries = entries;
+                Bounds = bounds;
+                IsBody = isBody;
+                ExpandedToParent = expandedToParent;
+            }
         }
 
         private readonly Dictionary<int, RendererData> _rendererCache = new Dictionary<int, RendererData>();
@@ -126,6 +139,7 @@ namespace BreakoutOutlines.Drawer
 
         private struct DrawObject
         {
+            public RendererData LooseLoot;
             public int SourceId;
             public MeshEntry[] Entries;
             public bool IsContainer;
@@ -133,7 +147,15 @@ namespace BreakoutOutlines.Drawer
             public Bounds Bounds;
             public float Fade;
             public DrawObject(int sourceId, MeshEntry[] e, bool c, Bounds b, float fade, bool body = false)
-            { SourceId = sourceId; Entries = e; IsContainer = c; IsBody = body; Bounds = b; Fade = fade; }
+            {
+                SourceId = sourceId;
+                Entries = e;
+                IsContainer = c;
+                IsBody = body;
+                Bounds = b;
+                Fade = fade;
+                LooseLoot = null;
+            }
         }
 
         private readonly List<DrawObject> _drawObjects = new List<DrawObject>();
@@ -223,7 +245,7 @@ namespace BreakoutOutlines.Drawer
         private static readonly int PROP_EdgeDepthBiasBody = Shader.PropertyToID("_EdgeDepthBiasBody");
         private static readonly int PROP_MaskBodyFlag = Shader.PropertyToID("_MaskBodyFlag");
         private static readonly int PROP_OutlineAlpha = Shader.PropertyToID("_OutlineAlpha");
-        private static readonly int PROP_OutlineFade = Shader.PropertyToID("_OutlineFade");
+        private static readonly int PROP_HighlightOpacity = Shader.PropertyToID("_HighlightOpacity");
         private static readonly int PROP_MaskFadeOnly = Shader.PropertyToID("_MaskFadeOnly");
         
         private void Awake()
@@ -233,6 +255,7 @@ namespace BreakoutOutlines.Drawer
                 (a.Bounds.center - _drawSortOrigin).sqrMagnitude
                 .CompareTo((b.Bounds.center - _drawSortOrigin).sqrMagnitude);
 
+            _questLookup = QuestCheckmarks.TryConnect();
             InitializeShaderPipeline();
         }
 
@@ -266,6 +289,7 @@ namespace BreakoutOutlines.Drawer
             _limitOpacityForNightVision = Plugin.LimitNightVisionOpacity.Value
                 && Plugin.IsNightVisionActive(gameWorld.MainPlayer);
 
+            RefreshQuestHighlight();
             EnsureCommandBufferAttached();
 
             if (_useMaskEdge || _useThreePass)

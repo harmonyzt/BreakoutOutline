@@ -25,8 +25,6 @@ namespace BreakoutOutlines.Drawer
             if (cam == null) return;
 
             RecordRenderDimensions(cam);
-            Vector3 camPos = cam.transform.position;
-            Vector3 camFwd = cam.transform.forward;
             GeometryUtility.CalculateFrustumPlanes(cam, _frustumPlanes);
 
             bool losOn = Plugin.LineOfSightCheck.Value;
@@ -40,24 +38,29 @@ namespace BreakoutOutlines.Drawer
             {
                 var d = _drawObjects[oi];
 
-                float fwdDist = Vector3.Dot(camFwd, d.Bounds.center - camPos);
-                if (fwdDist < 0f) continue;
-
-                if (!ComputeLiveBounds(d.Entries, out var liveBounds)) liveBounds = d.Bounds;
+                if (!ComputeLiveBounds(d.Entries, out var liveBounds))
+                {
+                    liveBounds = d.Bounds;
+                }
 
                 if (!GeometryUtility.TestPlanesAABB(_frustumPlanes, liveBounds))
+                {
                     continue;
+                }
 
                 var stencilMat = d.IsContainer ? _contStencilMat : _itemStencilMat;
                 var drawMat = d.IsBody ? _bodyDrawMat
                                           : (d.IsContainer ? _contDrawMat : _itemDrawMat);
                 var clearMat = d.IsContainer ? _contClearMat : _itemClearMat;
-                var color = d.IsContainer ? contColor : itemColor;
+                var color = HighlightColor(d, itemColor, contColor);
                 color.a *= d.Fade;
 
                 int n = d.Entries.Length;
                 if (_matrixBuffer.Length < n)
+                {
                     _matrixBuffer = new Matrix4x4[Mathf.Max(n, _matrixBuffer.Length * 2)];
+                }
+                
                 for (int i = 0; i < n; i++)
                 {
                     var e = d.Entries[i];

@@ -1,4 +1,3 @@
-using EFT;
 using UnityEngine;
 
 namespace BreakoutOutlines.Drawer

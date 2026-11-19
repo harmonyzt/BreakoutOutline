@@ -100,12 +100,13 @@ namespace BreakoutOutlines.Drawer
                 $"[BreakoutOutline] QUEUED '{n}' id={id} equippedHas={has} equippedCount={_equippedItemIds.Count}");
         }
 
-        private static bool IsOwnedByAnyPlayer(LootItem li, HashSet<Transform> playerTransforms, HashSet<string> equippedItemIds)
+        private static bool IsOwnedByAnyPlayer(LootItem li, HashSet<Transform> playerTransforms, HashSet<string> equippedItemIds, out Item item)
         {
+            item = null;
             // 1. Item-id match against every player's equipped inventory.
             try
             {
-                var item = li.Item;
+                item = li.Item;
                 if (item != null && item.Id != null && equippedItemIds.Contains(item.Id))
                     return true;
             }

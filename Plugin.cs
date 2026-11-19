@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
@@ -23,9 +23,13 @@ namespace BreakoutOutlines
         public static ConfigEntry<bool> DrawDeadBodiesFullBody;
         public static ConfigEntry<bool> HideSearchedContainers;
         public static ConfigEntry<Color> ItemOutlineColor;
+        public static ConfigEntry<Color> WishlistColor;
+        public static ConfigEntry<Color> QuestColor;
         public static ConfigEntry<Color> ContainerOutlineColor;
         public static ConfigEntry<bool> LimitNightVisionOpacity;
         public static ConfigEntry<float> OutlineWidth;
+        public static ConfigEntry<float> InteriorTint;
+        public static ConfigEntry<float> InteriorShimmer;
         public static ConfigEntry<float> DetectionRange;
         public static ConfigEntry<bool> LineOfSightCheck;
         public static ConfigEntry<float> BodyDepthBias;
@@ -70,13 +74,27 @@ namespace BreakoutOutlines
             DrawDeadBodiesFullBody = Config.Bind("1. General", "Draw Dead Bodies Fully", false, "When enabled, outline dead bodies including their equipment. When disabled, only outline the body itself without worn gear");
 
             // Visuals
-            ItemOutlineColor = Config.Bind("2. Visuals", "Item Color", new Color(1f, 1f, 1f, 0.8f), "Outline color for loose items");
+            ItemOutlineColor = Config.Bind("2. Visuals", "Item Color", new Color(1f, 1f, 1f, 0.8f), "Loose item highlight color. Alpha controls only the outline.");
 
-            ContainerOutlineColor = Config.Bind("2. Visuals", "Container Color", new Color(1f, 1f, 1f, 0.8f), "Outline color for containers");
+            WishlistColor = Config.Bind("2. Visuals", "Wishlist Color", new Color(0.60f, 0.80f, 1f),
+                "Tint for loose items on your personal wishlist. Uses the Item Color outline alpha.");
+
+            QuestColor = Config.Bind("2. Visuals", "Quest Color", new Color(1f, 0.72f, 0.23f),
+                "Tint for loose quest items, including optional AllQuestsCheckmarks matches. Uses the Item Color outline alpha.");
+
+            ContainerOutlineColor = Config.Bind("2. Visuals", "Container Color", new Color(1f, 1f, 1f, 0.8f), "Container highlight color. Alpha controls only the outline.");
 
             OutlineWidth = Config.Bind("2. Visuals", "Outline Thickness", 3f,
                 new ConfigDescription("Outline thickness in pixels (distance-independent)",
                     new AcceptableValueRange<float>(1f, 20f)));
+
+            InteriorTint = Config.Bind("2. Visuals", "Interior Tint", 0.10f,
+                new ConfigDescription("Steady fill opacity for loose items and containers, using their outline color.",
+                    new AcceptableValueRange<float>(0f, 1f)));
+
+            InteriorShimmer = Config.Bind("2. Visuals", "Interior Shimmer", 0.12f,
+                new ConfigDescription("Extra opacity at the crest of a slow moving highlight. Set to zero for a steady tint.",
+                    new AcceptableValueRange<float>(0f, 1f)));
 
             BodyDepthBias = Config.Bind("2. Visuals", "Body Outline Depth Bias", 0.5f,
                 new ConfigDescription("Occlusion tolerance for dead-body outlines at contact surfaces (meters). Raise it if prone bodies still fragment - lower it if body outlines bleed through thin walls. Loose items and containers use a fixed tight bias",
@@ -84,7 +102,7 @@ namespace BreakoutOutlines
 
             // Performance
             LimitNightVisionOpacity = Config.Bind("3. Performance", "Limit Opacity With Night Vision", true,
-                "Cap loose loot and container outline alpha at half while night vision is active to prevent bleeding/excessive bloom of outlines");
+                "While night vision is active, cap outline alpha at 0.5 and halve interior tint and shimmer opacity.");
 
             LineOfSightCheck = Config.Bind("3. Performance", "Line of Sight Check", true, "Enable to hide outlines for items, containers and bodies so outlines don't bleed through floors and walls. Turn OFF to see every outline through everything");
 

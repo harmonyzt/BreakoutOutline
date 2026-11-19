@@ -77,7 +77,14 @@ namespace BreakoutOutlines.Drawer
                     if (_searchedContainers.Add(instanceId))
                     {
                         if (Plugin.HideSearchedContainers.Value)
+                        {
                             RemoveSearchedContainerDraw(instanceId);
+                            if (_drawerCabinets.TryGetValue(container, out var cabinet) && cabinet != null &&
+                                cabinet.Root != null && !TryGetNearestDrawer(cabinet, out _))
+                            {
+                                RemoveSearchedContainerDraw(cabinet.Root.GetInstanceID());
+                            }
+                        }
                     }
 
                     return;

@@ -9,6 +9,7 @@ Shader "LootOutline/Clear"
 
         Pass
         {
+            Cull Off
             ColorMask 0
             ZWrite    Off
             ZTest     Always

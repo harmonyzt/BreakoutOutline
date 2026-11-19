@@ -6,8 +6,6 @@ namespace BreakoutOutlines.Drawer
     public partial class LootOutlineController
     {
         // Cached per-frame values to avoid repeated calculations
-        private Vector3 _cachedCamPos;
-        private Vector3 _cachedCamFwd;
         private Color _cachedItemColor;
         private Color _cachedContColor;
         private float _cachedBodyBias;
@@ -18,12 +16,10 @@ namespace BreakoutOutlines.Drawer
         private static readonly System.Collections.Generic.Stack<System.Collections.Generic.List<MeshEntry>> _entryListPool
             = new System.Collections.Generic.Stack<System.Collections.Generic.List<MeshEntry>>();
 
-        private void CacheFrameRenderData(Camera cam, bool losOn)
+        private void CacheFrameRenderData(bool losOn)
         {
             if (_frameDataCached) return;
 
-            _cachedCamPos = cam.transform.position;
-            _cachedCamFwd = cam.transform.forward;
             _cachedItemColor = GetOutlineColor(false);
             _cachedContColor = GetOutlineColor(true);
             _cachedBodyBias = Plugin.BodyDepthBias.Value;
@@ -59,6 +55,7 @@ namespace BreakoutOutlines.Drawer
                 if (entries[i].Smr != null)
                     return true;
             }
+
             return false;
         }
 
@@ -73,12 +70,10 @@ namespace BreakoutOutlines.Drawer
             {
                 var e = entries[i];
                 if (e.Smr != null) continue;
-                buffer[i] = e.Tx != null
-                    ? e.Tx.localToWorldMatrix * e.LocalOffset
-                    : e.FixedMatrix;
+                buffer[i] = e.Tx != null ? e.Tx.localToWorldMatrix * e.LocalOffset : e.FixedMatrix;
             }
         }
-        
+
         // Async cache builder
         private IEnumerator CacheBuilderLoop()
         {
@@ -95,8 +90,7 @@ namespace BreakoutOutlines.Drawer
                 int processed = 0;
                 int built = 0;
                 int failed = 0;
-                while (_cacheQueue.Count > 0
-                       && (Time.realtimeSinceStartup - start) < CacheBudgetSeconds)
+                while (_cacheQueue.Count > 0 && (Time.realtimeSinceStartup - start) < CacheBudgetSeconds)
                 {
                     var req = _cacheQueue.Dequeue();
                     _pendingCacheIds.Remove(req.InstanceId);
@@ -111,11 +105,10 @@ namespace BreakoutOutlines.Drawer
                     float buildMs = (Time.realtimeSinceStartup - buildStart) * 1000f;
                     if (Plugin.DebugLogging.Value)
                     {
-                        Plugin.LogSource?.LogInfo(
-                            $"[BreakoutOutline][PERF][CACHE ITEM] name='{req.Go.name}' " +
-                            $"ms={buildMs:F3} entries={rd.Entries.Length} " +
-                            $"body={req.BodyOnly} expanded={req.ExpandToPrefabRoot}");
+                        Plugin.LogSource?.LogInfo($"[BreakoutOutline][PERF][CACHE ITEM] name='{req.Go.name}' " + $"ms={buildMs:F3} entries={rd.Entries.Length} "
+                                                                                                               + $"body={req.BodyOnly} expanded={req.ExpandToPrefabRoot}");
                     }
+
                     if (rd.Entries.Length > 0)
                     {
                         _rendererCache[req.InstanceId] = rd;
@@ -126,29 +119,24 @@ namespace BreakoutOutlines.Drawer
                     else
                     {
                         failed++;
-                        _failRetryAt[req.InstanceId] = Time.realtimeSinceStartup
-                            + (req.BodyOnly ? BodyFailRetrySeconds : ItemFailRetrySeconds);
-                        if (Plugin.DebugLogging.Value
-                            && !req.BodyOnly && !req.ExpandToPrefabRoot
-                            && _loggedItemFailures.Add(req.Go.name))
+                        _failRetryAt[req.InstanceId] = Time.realtimeSinceStartup + (req.BodyOnly ? BodyFailRetrySeconds : ItemFailRetrySeconds);
+                        if (Plugin.DebugLogging.Value && !req.BodyOnly && !req.ExpandToPrefabRoot && _loggedItemFailures.Add(req.Go.name))
                         {
                             int totalChildren = req.Go.GetComponentsInChildren<Transform>(true).Length;
                             int activeRends = req.Go.GetComponentsInChildren<Renderer>(false).Length;
                             int allRends = req.Go.GetComponentsInChildren<Renderer>(true).Length;
-                            Plugin.LogSource?.LogInfo(
-                                $"[BreakoutOutline] Item '{req.Go.name}' produced 0 entries " +
-                                $"(children={totalChildren}, activeRenderers={activeRends}, " +
-                                $"allRenderers={allRends}, activeInHierarchy={req.Go.activeInHierarchy})");
+                            Plugin.LogSource?.LogInfo($"[BreakoutOutline] Item '{req.Go.name}' produced 0 entries " + $"(children={totalChildren}, activeRenderers={activeRends}, "
+                                                                                                                    + $"allRenderers={allRends}, activeInHierarchy={req.Go.activeInHierarchy})");
                         }
                     }
                 }
+
                 if (Plugin.DebugLogging.Value)
                 {
-                    Plugin.LogSource?.LogInfo(
-                        $"[BreakoutOutline][PERF][CACHE] ms={(Time.realtimeSinceStartup - start) * 1000f:F3} " +
-                        $"processed={processed} built={built} failed={failed} " +
-                        $"remaining={_cacheQueue.Count} cached={_rendererCache.Count}");
+                    Plugin.LogSource?.LogInfo($"[BreakoutOutline][PERF][CACHE] ms={(Time.realtimeSinceStartup - start) * 1000f:F3} "
+                                              + $"processed={processed} built={built} failed={failed} " + $"remaining={_cacheQueue.Count} cached={_rendererCache.Count}");
                 }
+
                 yield return null;
             }
         }
@@ -172,8 +160,14 @@ namespace BreakoutOutlines.Drawer
                 if (!r.enabled) continue;
                 if (!r.gameObject.activeInHierarchy) continue;
                 Bounds rb = r.bounds;
-                if (seeded) bounds.Encapsulate(rb); else { bounds = rb; seeded = true; }
+                if (seeded) bounds.Encapsulate(rb);
+                else
+                {
+                    bounds = rb;
+                    seeded = true;
+                }
             }
+
             return seeded;
         }
     }

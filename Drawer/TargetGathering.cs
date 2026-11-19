@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using EFT.Interactive;
 using UnityEngine;
 
 namespace BreakoutOutlines.Drawer
@@ -9,7 +10,7 @@ namespace BreakoutOutlines.Drawer
         private void GatherTarget(GameObject go, Vector3 playerPos, float range,
                                   bool expandToPrefabRoot, bool isContainer,
                                   bool bodyOnly = false,
-                                  Vector3? worldPosOverride = null)
+                                  Vector3? worldPosOverride = null, EFT.InventoryLogic.Item looseItem = null)
         {
             int id = go.GetInstanceID();
             _activeThisTick.Add(id);
@@ -37,7 +38,7 @@ namespace BreakoutOutlines.Drawer
 
             MeshEntry[] drawEntries = cached.Entries;
             Bounds drawBounds = cached.Bounds;
-            if (expandToPrefabRoot)
+            if (cached.ExpandedToParent)
             {
                 _expandedRendererScratch.Clear();
                 Bounds nearbyBounds = default;
@@ -95,7 +96,23 @@ namespace BreakoutOutlines.Drawer
             float distance = Mathf.Sqrt(distanceSqr);
             float fade = Mathf.Clamp01(1f - distance / Mathf.Max(range, 0.001f));
 
-            _drawObjectsScratch.Add(new DrawObject(id, drawEntries, isContainer, drawBounds, fade, bodyOnly));
+            var target = new DrawObject(id, drawEntries, isContainer, drawBounds, fade, bodyOnly);
+            if (looseItem != null && !isContainer && !bodyOnly)
+            {
+                if (!ReferenceEquals(cached.LooseItem, looseItem))
+                {
+                    cached.LooseItem = looseItem;
+                    cached.NativeQuestItem = looseItem.QuestItem;
+                    cached.QuestNeeded = false;
+                    cached.NextQuestCheck = 0f;
+                }
+
+                var wishlist = _gameWorld.MainPlayer.Profile?.WishlistManager;
+                cached.Wishlisted = wishlist != null && wishlist.IsInWishlist(looseItem.TemplateId, false, out _);
+                target.LooseLoot = cached;
+            }
+
+            _drawObjectsScratch.Add(target);
         }
 
         private static RendererData CollectRenderers(GameObject go, bool expandToPrefabRoot, bool bodyOnly = false)
@@ -148,7 +165,8 @@ namespace BreakoutOutlines.Drawer
                 }
             }
 
-            if (expandToPrefabRoot && !bodyOnly && go.activeInHierarchy)
+            bool expandedToParent = false;
+            if (expandToPrefabRoot && !bodyOnly && go.activeInHierarchy && !HasOwnDrawerMesh(go, selected))
             {
                 const int MaxParentChildren = 12;
                 const int MaxWalkUpLevels = 2;
@@ -160,6 +178,7 @@ namespace BreakoutOutlines.Drawer
                     if (expanded.Length <= selected.Length) break;
                     if (expanded.Length > RootExpansionRendererCap) break;
 
+                    expandedToParent = true;
                     selected = expanded;
                     p = p.parent;
                 }
@@ -221,7 +240,34 @@ namespace BreakoutOutlines.Drawer
 
             return new RendererData(entries.ToArray(),
                 hasBounds ? combined : new Bounds(go.transform.position, Vector3.one),
-                bodyOnly);
+                bodyOnly, expandedToParent);
+        }
+
+        private const string DrawerTemplateId = "578f87b7245977356274f2cd";
+
+        private static bool HasOwnDrawerMesh(GameObject target, Renderer[] renderers)
+        {
+            var container = target.GetComponent<LootableContainer>();
+            var rootItem = container?.ItemOwner?.RootItem;
+            if (rootItem == null || rootItem.TemplateId != DrawerTemplateId)
+            {
+                return false;
+            }
+
+            foreach (var renderer in renderers)
+            {
+                if (renderer is SkinnedMeshRenderer skinned && skinned.sharedMesh != null)
+                {
+                    return true;
+                }
+
+                if (renderer != null && renderer.TryGetComponent<MeshFilter>(out var filter) && filter.sharedMesh != null)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static string RendererPath(Transform t)

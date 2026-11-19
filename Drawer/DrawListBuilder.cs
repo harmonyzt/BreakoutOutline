@@ -49,6 +49,7 @@ namespace BreakoutOutlines.Drawer
             _equippedItemIds.Clear();
             _activeThisTick.Clear();
             _drawObjectsScratch.Clear();
+            _visitedCabinets.Clear();
 
             // Deep equipped-ID walk for local player
             if (gameWorld.MainPlayer is MonoBehaviour mpMb)
@@ -187,7 +188,7 @@ namespace BreakoutOutlines.Drawer
 
                 _diagInRange++;
 
-                if (IsOwnedByAnyPlayer(li, _playerTransforms, _equippedItemIds))
+                if (IsOwnedByAnyPlayer(li, _playerTransforms, _equippedItemIds, out var item))
                 {
                     _diagOwned++;
                     if (_passDiag && _loggedOwnershipRejects.Add(li.gameObject.name))
@@ -199,7 +200,7 @@ namespace BreakoutOutlines.Drawer
                 LogQueuedDiag(_passDiag, li);
                 GatherTarget(li.gameObject, _passPlayerPos, _passRange,
                              expandToPrefabRoot: false,
-                             isContainer: false);
+                             isContainer: false, looseItem: item);
             }
 
             long sliceTicks = Stopwatch.GetTimestamp() - sliceStartTicks;
@@ -237,12 +238,35 @@ namespace BreakoutOutlines.Drawer
             for (int i = _buildCursor; i < end; i++)
             {
                 var c = _containerCache[i];
-                if (c == null || c.gameObject == null) continue;
+                if (c == null || c.gameObject == null)
+                {
+                    continue;
+                }
+                
                 _activeThisTick.Add(c.gameObject.GetInstanceID());
-                if ((c.transform.position - _passPlayerPos).sqrMagnitude > _passPrefilterSqr) continue;
-                if (!ContainerHasLoot(c) && !Plugin.OutlineEmptyContainers.Value) continue;
-                if (Plugin.HideSearchedContainers.Value && ContainerHasBeenSearched(c)) continue;
-                if (_playerTransforms.Contains(c.transform.root)) continue;
+
+                if ((c.transform.position - _passPlayerPos).sqrMagnitude > _passPrefilterSqr)
+                {
+                    continue;
+                }
+                
+                var cabinet = GetFilingCabinet(c);
+                if (cabinet != null)
+                {
+                    if (_visitedCabinets.Add(cabinet) && TryGetNearestDrawer(cabinet, out var nearest))
+                    {
+                        GatherTarget(cabinet.Root, _passPlayerPos, _passRange,
+                            expandToPrefabRoot: false, isContainer: true, worldPosOverride: nearest);
+                    }
+
+                    continue;
+                }
+
+                if (!CanHighlightContainer(c))
+                {
+                    continue;
+                }
+
                 GatherTarget(c.gameObject, _passPlayerPos, _passRange,
                              expandToPrefabRoot: true,
                              isContainer: true);
@@ -322,6 +346,8 @@ namespace BreakoutOutlines.Drawer
             _deadBodyPositions.Clear();
             _containerCache = System.Array.Empty<LootableContainer>();
             _containerLootCache.Clear();
+            _drawerCabinets.Clear();
+            _visitedCabinets.Clear();
             _lootItemsSource = null;
             _lootItemsScanLimit = 0;
             _mainEquipIds = System.Array.Empty<string>();

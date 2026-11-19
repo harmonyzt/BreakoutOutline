@@ -19,15 +19,6 @@
 // (collider-independent), so EFT's colliderless walls occlude correctly.
 Shader "LootOutline/Mask"
 {
-    Properties
-    {
-        _OutlineColor ("Outline Color", Color) = (1, 1, 1, 1)
-        // 0 = always write (no occlusion); 1 = clip pixels behind scene depth.
-        _DepthOcclude ("Depth Occlude", Float) = 1
-        // Eye-space (metres) tolerance so a surface doesn't self-occlude at its
-        // own contact edge. Bodies pass a larger value (flat-corpse floor clip).
-        _DepthBias ("Depth Bias (m)", Float) = 0.03
-    }
     SubShader
     {
         Tags { "Queue" = "Transparent" "IgnoreProjector" = "True" }
@@ -53,13 +44,16 @@ Shader "LootOutline/Mask"
                 float4 pos       : SV_POSITION;
                 float4 screenPos : TEXCOORD0;
                 float  eyeDepth  : TEXCOORD1;
+                float  shimmerPhase : TEXCOORD2;
             };
 
             float4 _OutlineColor;
             float  _DepthOcclude;
             float  _DepthBias;
-            float  _OutlineFade;
+            float2 _HighlightOpacity; // x = outline alpha, y = independent interior fade
             float  _MaskFadeOnly;
+            float  _InteriorTint;
+            float  _InteriorShimmer;
             // 1 = dead body → write NEGATIVE depth so the edge pass can apply the
             // loose body ring bias. Deliberately NOT in the Properties block: a
             // declared property's material default can shadow the per-object
@@ -74,20 +68,26 @@ Shader "LootOutline/Mask"
                 o.pos       = UnityObjectToClipPos(v.vertex);
                 o.screenPos = ComputeScreenPos(o.pos);
                 o.eyeDepth  = -UnityObjectToViewPos(v.vertex).z;
+                float3 world = mul(unity_ObjectToWorld, v.vertex).xyz;
+                o.shimmerPhase = dot(world, float3(2.0, 5.0, 1.0));
                 return o;
             }
 
             float4 frag(v2f i) : SV_Target
             {
-                if (_MaskFadeOnly > 0.5)
-                    return float4(_OutlineFade, 0, 0, 0);
-
                 if (_DepthOcclude > 0.5)
                 {
                     float2 uv = i.screenPos.xy / i.screenPos.w;
                     float  sd = LinearEyeDepth(SAMPLE_DEPTH_TEXTURE(_CameraDepthTexture, uv));
                     clip(sd - i.eyeDepth + _DepthBias);
                 }
+                if (_MaskFadeOnly > 0.5)
+                {
+                    float wave = 0.5 + 0.5 * cos(i.shimmerPhase - _Time.y * 1.25);
+                    float fill = saturate(_InteriorTint + _InteriorShimmer * wave * wave);
+                    return float4(_HighlightOpacity.x, _HighlightOpacity.y * fill, 0, 0);
+                }
+
                 // RGB = colour, A = signed eye depth (non-zero ⇒ filled;
                 // negative ⇒ body — see header).
                 float a = max(i.eyeDepth, 1e-4);
